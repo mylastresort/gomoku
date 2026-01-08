@@ -9,7 +9,7 @@ import { EndgameDialog } from "@/components/gomoku/EndgameDialog"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/toast"
-import { gameClient } from "@/lib/adapters/gameClient"
+import { gameClient, type BoardCellPayload, type GameStartedPayload, type GameWinPayload, type GameEndedPayload } from "@/lib/adapters/gameClient"
 import {
   createBoard,
   placeMove,
@@ -22,6 +22,7 @@ import type {
   GameMode,
   GameSettings,
   Player,
+  Stone,
 } from "@/lib/gomoku/types"
 
 const defaultSettings: GameSettings = {
@@ -55,20 +56,136 @@ export default function Home() {
     players: defaultPlayers,
   }))
 
+  // Setup connection status listener
   React.useEffect(() => {
     const unsubscribe = gameClient.onStatusChange(setConnectionStatus)
     return unsubscribe
   }, [])
 
+  // Connect to WebSocket server on page load
   React.useEffect(() => {
-    if (mode === "online") {
-      gameClient.connect(mode)
-    } else {
+    console.log("Attempting to connect to WebSocket server...")
+    gameClient.connect("online").then(() => {
+      console.log("Connection successful")
+    }).catch((error) => {
+      console.error("Failed to connect:", error)
+      // Only show toast if it's a real error, not SSR
+      if (error.message !== "Cannot connect on server side") {
+        toast("Failed to connect to server", "destructive")
+      }
+    })
+
+    return () => {
+      console.log("Disconnecting from server")
       gameClient.disconnect()
     }
-  }, [mode])
+  }, [])
 
-  const resetGame = React.useCallback(() => {
+  // Setup WebSocket event handlers
+  React.useEffect(() => {
+    gameClient.setEventHandlers({
+      onGameStarted: (payload: GameStartedPayload) => {
+        console.log("Game started in room:", payload.room)
+        toast(`Game started!`, "default")
+        
+        // Now show the game board
+        setGameState((prev) => ({
+          ...prev,
+          status: "playing",
+        }))
+      },
+      onBoardCell: (payload: BoardCellPayload) => {
+        console.log("Received board cell update:", payload)
+        
+        // Convert backend player format to frontend format
+        const playerColor: Stone = payload.player_id === "Black" ? "black" : 
+                                   payload.player_id === "White" ? "white" : null
+        
+        // Update the board with the move (or clear it if playerColor is null)
+        setGameState((prev) => {
+          const newBoard = prev.board.map((row) => [...row])
+          newBoard[payload.y][payload.x] = playerColor
+          
+          let newMoves = [...prev.moves]
+          let lastMove = prev.lastMove
+          let hasWon = false
+          
+          if (playerColor !== null) {
+            // Adding a move
+            const move = createMove(payload.y, payload.x, playerColor)
+            newMoves = [...prev.moves, move]
+            lastMove = move
+            
+          } else {
+            // Removing a move (undo) - remove moves at this position
+            newMoves = prev.moves.filter(m => !(m.row === payload.y && m.col === payload.x))
+            lastMove = newMoves.length > 0 ? newMoves[newMoves.length - 1] : null
+          }
+          
+          return {
+            ...prev,
+            board: newBoard,
+            moves: newMoves,
+            lastMove: lastMove,
+            currentPlayer: playerColor === null ? prev.currentPlayer : 
+                          (playerColor === "black" ? "white" : "black"),
+            winner: hasWon ? playerColor : null,
+            status: hasWon ? "finished" : "playing",
+          }
+        })
+      },
+      onGameWin: (payload) => {
+        console.log("Game won:", payload)
+        const winner: Stone = payload.player_id === "Black" ? "black" : "white"
+        
+        setGameState((prev) => ({
+          ...prev,
+          winner,
+          status: "finished",
+        }))
+        
+        toast(`${winner === "black" ? "Black" : "White"} player wins!`, "default")
+      },
+      onGameEnded: (payload) => {
+        console.log("Game ended:", payload.message)
+        toast(payload.message, "default")
+        
+        setGameState((prev) => ({
+          ...prev,
+          status: "finished",
+        }))
+      },
+      onPlayerLeave: () => {
+        console.log("Player left the game")
+        toast("Opponent has left the game", "destructive")
+        
+        setGameState((prev) => ({
+          ...prev,
+          status: "finished",
+        }))
+      },
+      onEventError: (error: string) => {
+        console.error("Event error:", error)
+        toast(`Error: ${error}`, "destructive")
+      },
+      onRoomError: (error: string) => {
+        console.error("Room error:", error)
+        toast(`Room error: ${error}`, "destructive")
+      },
+      onConnect: () => {
+        console.log("Connected to server")
+        toast("Connected to server", "default")
+      },
+      onDisconnect: () => {
+        console.log("Disconnected from server")
+        toast("Disconnected from server", "destructive")
+      },
+    })
+  }, [toast])
+
+
+
+  const resetGame = React.useCallback(async () => {
     setGameState({
       board: createBoard(settings.boardSize),
       currentPlayer: "black",
@@ -80,7 +197,17 @@ export default function Home() {
       mode,
       players: defaultPlayers,
     })
-  }, [settings.boardSize, mode])
+
+    // For online/AI modes, notify the server to start a new game
+    if ((mode === "online" || mode === "ai") && gameClient.isConnected()) {
+      try {
+        await gameClient.startGame(settings.boardSize, mode)
+      } catch (error) {
+        console.error("Failed to start game:", error)
+        toast(`Failed to start game: ${error}`, "destructive")
+      }
+    }
+  }, [settings.boardSize, mode, toast])
 
   React.useEffect(() => {
     if (settings.boardSize !== gameState.boardSize) {
@@ -89,7 +216,7 @@ export default function Home() {
   }, [settings.boardSize, gameState.boardSize, resetGame])
 
   const handleCellClick = React.useCallback(
-    (row: number, col: number) => {
+    async (row: number, col: number) => {
       if (gameState.status !== "playing") {
         return
       }
@@ -99,6 +226,19 @@ export default function Home() {
         return
       }
 
+      // For online/AI modes, send move to server
+      if ((mode === "online" || mode === "ai") && gameClient.isConnected()) {
+        try {
+          await gameClient.makeMove(col, row) // Backend uses x=col, y=row
+          // Server will respond with board-cell event to update the board
+        } catch (error) {
+          console.error("Failed to make move:", error)
+          toast(`Failed to make move: ${error}`, "destructive")
+        }
+        return
+      }
+
+      // For local mode, handle move locally
       const result = placeMove(
         gameState.board,
         row,
@@ -124,18 +264,28 @@ export default function Home() {
         winner: hasWon ? prev.currentPlayer : null,
         status: hasWon ? "finished" : "playing",
       }))
-
-      // TODO: For AI mode, make AI move after player move
-      // TODO: For online mode, send move to server
     },
-    [gameState, toast]
+    [gameState, toast, mode]
   )
 
-  const handleUndo = React.useCallback(() => {
-    if (mode === "online" || gameState.moves.length === 0) {
+  const handleUndo = React.useCallback(async () => {
+    if (gameState.moves.length === 0) {
       return
     }
 
+    // For online/AI modes, request undo from server
+    if ((mode === "online" || mode === "ai") && gameClient.isConnected()) {
+      try {
+        await gameClient.requestUndo()
+        // Server will respond with undo event to update the board
+      } catch (error) {
+        console.error("Failed to undo:", error)
+        toast(`Failed to undo: ${error}`, "destructive")
+      }
+      return
+    }
+
+    // For local mode, handle undo locally
     const { board: newBoard, newMoves } = undoMove(
       gameState.board,
       gameState.moves
@@ -151,23 +301,32 @@ export default function Home() {
       status: "playing",
       winner: null,
     }))
-  }, [gameState, mode])
+  }, [gameState, mode, toast])
 
   const handleRestart = React.useCallback(() => {
     resetGame()
   }, [resetGame])
 
-  const handleResign = React.useCallback(() => {
+  const handleResign = React.useCallback(async () => {
+    // For online/AI modes, notify server that we're leaving
+    if ((mode === "online" || mode === "ai") && gameClient.isConnected()) {
+      try {
+        await gameClient.leaveGame()
+      } catch (error) {
+        console.error("Failed to leave game:", error)
+      }
+    }
+    
     setGameState((prev) => ({
       ...prev,
       status: "finished",
       winner: prev.currentPlayer === "black" ? "white" : "black",
     }))
-  }, [])
+  }, [mode])
 
-  const handleModeChange = React.useCallback((newMode: GameMode) => {
+  const handleModeChange = React.useCallback(async (newMode: GameMode) => {
     setMode(newMode)
-    resetGame()
+    await resetGame()
   }, [resetGame])
 
   const handleSettingsChange = React.useCallback(
@@ -180,7 +339,10 @@ export default function Home() {
   const showEndgameDialog =
     gameState.status === "finished" && gameState.winner !== null
 
+  console.log("Current game status:", gameState.status)
+
   if (gameState.status === "waiting") {
+    console.log("Rendering waiting screen with mode selection buttons")
     return (
       <div className="flex flex-col min-h-screen">
         <Header
@@ -207,8 +369,24 @@ export default function Home() {
                   <Button
                     variant="outline"
                     onClick={() => {
+                      console.log("AI button clicked")
                       setMode("ai")
-                      setGameState((prev) => ({ ...prev, status: "playing" }))
+                      setGameState((prev) => ({ ...prev, mode: "ai" }))
+                      
+                      // Send game-start to server
+                      console.log("Is connected?", gameClient.isConnected())
+                      if (gameClient.isConnected()) {
+                        try {
+                          console.log("Starting AI game with board size:", settings.boardSize)
+                          gameClient.startGame(settings.boardSize, "ai")
+                        } catch (error) {
+                          console.error("Failed to start AI game:", error)
+                          toast(`Failed to start AI game: ${error}`, "destructive")
+                        }
+                      } else {
+                        console.log("Not connected - cannot start game")
+                        toast("Not connected to server", "destructive")
+                      }
                     }}
                   >
                     vs AI
@@ -216,8 +394,24 @@ export default function Home() {
                   <Button
                     variant="outline"
                     onClick={() => {
+                      console.log("Online button clicked")
                       setMode("online")
-                      setGameState((prev) => ({ ...prev, status: "playing" }))
+                      setGameState((prev) => ({ ...prev, mode: "online" }))
+                      
+                      // Send game-start to server
+                      console.log("Is connected?", gameClient.isConnected())
+                      if (gameClient.isConnected()) {
+                        try {
+                          console.log("Starting online game with board size:", settings.boardSize)
+                          gameClient.startGame(settings.boardSize, "online")
+                        } catch (error) {
+                          console.error("Failed to start online game:", error)
+                          toast(`Failed to start online game: ${error}`, "destructive")
+                        }
+                      } else {
+                        console.log("Not connected - cannot start game")
+                        toast("Not connected to server", "destructive")
+                      }
                     }}
                   >
                     Online

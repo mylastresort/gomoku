@@ -10,7 +10,7 @@ use crate::{
     },
     game::{
         room::Room,
-        state::types::{GameMode, GameState},
+        state::types::{GameMode, GameState, Player},
     },
     shared::types::BoardSize,
 };
@@ -39,6 +39,35 @@ impl GameSession {
             state: GameState::new(_board_size),
             room: Room::default(),
             mode: GameMode::PvP, // Default mode
+        }
+    }
+
+    // Helper: Print the current board state
+    fn print_board(&self) {
+        info!("Current board state:");
+        info!("History length: {}", self.state.history.len());
+
+        let size = self.state.board.len();
+
+        // Print column headers
+        let mut header = "   ".to_string();
+        for col in 0..size {
+            header.push_str(&format!("{:2} ", col));
+        }
+        info!("{}", header);
+
+        // Print board rows
+        for (row, board_row) in self.state.board.iter().enumerate() {
+            let mut row_str = format!("{:2} ", row);
+            for cell in board_row {
+                let symbol = match cell {
+                    None => " ",
+                    Some(Player::Black) => "B",
+                    Some(Player::White) => "W",
+                };
+                row_str.push_str(&format!(" {} ", symbol));
+            }
+            info!("{}", row_str);
         }
     }
 
@@ -128,6 +157,9 @@ impl GameSession {
             info!("Updating game state with the move");
             // commit the result
             self.state.commit(res)?;
+
+            // Print the board after updating
+            self.print_board();
         }
 
         Ok(())
@@ -151,18 +183,29 @@ impl GameSession {
             return Err(err);
         }
 
+        info!("Undoing last move");
+
         // revert the last move in the game state
         let undo_moves = match self.state.reset(1) {
             Ok(mv) => mv,
             Err(err) => return Err(err),
         };
 
-        // Notify players about the undo action
+        info!("Notifying players about board cells to clear");
+
+        // Notify about the board cells that need to be cleared (set to None)
         for cell in undo_moves {
+            info!(
+                "Notifying to clear cell at ({}, {}, {:?})",
+                cell.x, cell.y, cell.player_id
+            );
             self.room
                 .notify_room::<BoardCellEvent>(_s, Some(cell))
                 .await;
         }
+
+        // Print the board after undo
+        self.print_board();
 
         Ok(())
     }

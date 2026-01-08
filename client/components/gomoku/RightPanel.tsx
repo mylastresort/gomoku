@@ -27,7 +27,7 @@ export function RightPanel({
   onRestart,
   onResign,
 }: RightPanelProps) {
-  const canUndo = mode !== "online" && gameState.moves.length > 0
+  const canUndo = gameState.moves.length > 0
 
   return (
     <div className="flex flex-col gap-4 w-full max-w-sm">

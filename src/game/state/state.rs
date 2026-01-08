@@ -172,7 +172,11 @@ impl GameState {
                         capture_set.remove(&gs_index);
                     }
                 }
-                ret.push(last_move.game_move.into());
+                ret.push(BoardCell {
+                    x: last_move.game_move.x,
+                    y: last_move.game_move.y,
+                    player_id: None,
+                });
             } else {
                 return Err(Error::new(
                     std::io::ErrorKind::Other,

@@ -6,6 +6,7 @@ use crate::{
     events::{
         event::Event, game_start::GameStartEvent,
         player_leave::PlayerLeaveEvent, player_move::PlayerMoveEvent,
+        undo::UndoEvent,
     },
     game::session::GameSession,
     shared::config::Config,
@@ -16,6 +17,7 @@ use clap::Parser;
 use socketioxide::{SocketIo, extract::SocketRef};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tower_http::cors::{Any, CorsLayer};
 use tracing::info;
 use tracing_subscriber::FmtSubscriber;
 
@@ -29,6 +31,7 @@ pub async fn handle_connection(s: SocketRef, config: Config) {
     // Register event handlers
     register_event!(GameStartEvent, &s, &_game_session);
     register_event!(PlayerMoveEvent, &s, &_game_session);
+    register_event!(UndoEvent, &s, &_game_session);
 
     // Handle client disconnection
     let session = Arc::clone(&_game_session);
@@ -54,8 +57,15 @@ pub async fn new_server(config: Config) {
         handle_connection(s, config).await;
     });
 
+    // Add CORS support for the client
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
+
     let app = axum::Router::new()
         .route("/", get(async || "Hello, World!"))
+        .layer(cors)
         .layer(layer);
 
     info!("Server listening on http://0.0.0.0:{}", port);
