@@ -24,7 +24,7 @@ impl Event for GameStartEvent {
         Ok(_payload)
     }
 
-    fn on_event_call(
+    async fn on_event_call(
         _game_session: &mut GameSession,
         _s: &SocketRef,
         _payload: Option<Self>,
@@ -55,6 +55,8 @@ impl Event for GameStartEvent {
             event.board_size, event.mode
         );
 
-        _game_session.start_game(_s, event.board_size, event.mode);
+        _game_session
+            .start_game(_s, event.board_size, event.mode)
+            .await;
     }
 }

@@ -14,5 +14,5 @@ pub trait RoomEvent {
         room_name: String,
         s: &SocketRef,
         payload: Option<Self::Payload>,
-    );
+    ) -> impl Future<Output = ()>;
 }

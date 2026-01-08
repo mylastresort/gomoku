@@ -1,19 +1,38 @@
+use std::collections::{HashMap, HashSet};
+
 use serde::{Deserialize, Serialize};
 
-#[derive(Copy, Clone, PartialEq, Deserialize, Serialize)]
+use crate::game::{capture::Capture, win::Win};
+
+#[derive(Copy, Clone, PartialEq, Deserialize, Serialize, Eq, Hash, Debug)]
 pub enum Player {
     White,
     Black,
 }
 
 // implement player to int conversion
-impl Player {}
+impl Player {
+    // implement Opponent function
+    pub fn opponent(&self) -> Player {
+        match self {
+            Player::White => Player::Black,
+            Player::Black => Player::White,
+        }
+    }
+}
 
-#[derive(Copy, Clone, Deserialize, Serialize)]
+#[derive(Copy, Clone, Deserialize, Serialize, Debug)]
 pub struct GameMove {
-    pub x: u16,
-    pub y: u16,
+    pub x: usize,
+    pub y: usize,
     pub player_id: Player,
+}
+
+#[derive(Clone, Debug)]
+pub struct GameResult {
+    pub game_move: GameMove,
+    pub capture: Option<Capture>,
+    pub winner: Option<Win>,
 }
 
 #[derive(PartialEq)]
@@ -23,9 +42,10 @@ pub enum GameStatus {
 }
 
 pub struct GameState {
-    pub board: Vec<Vec<Option<GameMove>>>, // 2D board representation
-    pub history: Vec<GameMove>,            // History of moves
+    pub board: Vec<Vec<Option<Player>>>, // 2D board representation
+    pub history: Vec<GameResult>,        // History of game results
     pub status: GameStatus,
+    pub captures: HashMap<Player, HashSet<usize>>, // Captures per player
 }
 
 #[derive(Copy, Clone, PartialEq, Deserialize, Serialize, Debug)]

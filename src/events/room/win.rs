@@ -1,12 +1,7 @@
 use serde_json::json;
 use socketioxide::extract::SocketRef;
 
-use crate::{events::room::event::RoomEvent, game::state::Player};
-
-pub struct Win {
-    pub player_id: Player,
-    pub seq: Vec<(u16, u16)>,
-}
+use crate::{events::room::event::RoomEvent, game::win::Win};
 
 pub struct GameWinEvent {}
 
@@ -15,7 +10,7 @@ impl RoomEvent for GameWinEvent {
 
     type Payload = Win;
 
-    fn notify_room(
+    async fn notify_room(
         room_name: String,
         _s: &SocketRef,
         _payload: Option<Self::Payload>,

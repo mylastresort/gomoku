@@ -1,19 +1,16 @@
 use std::io::Error;
 
 use socketioxide::extract::SocketRef;
+use tracing::info;
 
 use crate::{
     events::room::{
-        board::{BoardCell, BoardCellEvent},
-        game_ended::GameEndedEvent,
-        game_started::GameStartedEvent,
+        board::BoardCellEvent, game_ended::GameEndedEvent,
+        game_started::GameStartedEvent, win::GameWinEvent,
     },
     game::{
         room::Room,
-        state::{
-            GameMove,
-            types::{GameMode, GameState},
-        },
+        state::types::{GameMode, GameState},
     },
     shared::types::BoardSize,
 };
@@ -59,7 +56,7 @@ impl GameSession {
 
     // Action: Start a new game session
     // creates a room once and notifies players that the game when started
-    pub fn start_game(
+    pub async fn start_game(
         &mut self,
         _s: &SocketRef,
         board_size: BoardSize,
@@ -69,80 +66,103 @@ impl GameSession {
         // Create a room and join players to push game events
         self.room.join_room(_s);
         // send notification to all players in the room that the game has started
-        self.room.notify_room::<GameStartedEvent>(_s, None);
+        self.room.notify_room::<GameStartedEvent>(_s, None).await;
     }
 
     // Action: Process a player's move
     // notifies all players in saved room about the move
-    pub fn make_move(
+    pub async fn make_move(
         &mut self,
         _s: &SocketRef,
-        _move: GameMove,
+        x: usize,
+        y: usize,
     ) -> Result<(), Error> {
+        info!("Processing move at ({}, {})", x, y);
         // check if game session has an active room
         if let Err(err) = self.get_active_room() {
             return Err(err);
         }
 
-        // apply the move to the game state and save optional captures
-        let captures = match self.state.apply_move(_move) {
-            Ok(captures) => {
-                // Notify players about the move
-                self.room.notify_room::<BoardCellEvent>(
-                    _s,
-                    Some(BoardCell {
-                        x: _move.x,
-                        y: _move.y,
-                        player_id: Some(_move.player_id),
-                    }),
-                );
-                captures
-            }
+        info!("Applying move to game state");
+
+        // apply the move to the game state
+        let game_result = match self.state.apply_move(x, y) {
+            Ok(res) => res,
             Err(err) => return Err(err),
         };
 
-        // Notify players about captures if any
-        if let Some(cap) = captures {
-            cap.emit(_s, self);
-        }
+        info!("Notifying players about the move");
 
-        if self.mode == GameMode::PvE {
-            todo!("Implement AI move logic here");
+        // check if there is a win
+        if let Some(res) = game_result {
+            info!("Move resulted in a game result: {:?}", res);
+            if let Some(winner) = res.winner.clone() {
+                info!("Player {:?} has won the game!", winner.player_id);
+                // notify players about the win
+                self.room
+                    .notify_room::<GameWinEvent>(_s, Some(winner))
+                    .await;
+                // set game status to finished
+                info!("Ending game session");
+                self.end_game(_s).await;
+            } else {
+                // notify players about the move
+                info!("Notifying players about the board cell update");
+                self.room
+                    .notify_room::<BoardCellEvent>(
+                        _s,
+                        Some(res.game_move.into()),
+                    )
+                    .await;
+                // notify players about the captures
+                if let Some(capture) = &res.capture {
+                    info!(
+                        "Player {:?} made a capture of {} pieces",
+                        capture.player_id,
+                        capture.seq.len()
+                    );
+                    // emit captures
+                    capture.emit(_s, self).await;
+                }
+            }
+            info!("Updating game state with the move");
+            // commit the result
+            self.state.commit(res)?;
         }
 
         Ok(())
     }
 
     // Action: End the current game session
-    pub fn end_game(&mut self, _s: &SocketRef) {
+    pub async fn end_game(&mut self, _s: &SocketRef) {
         // Logic to end the game
-        self.room.notify_room::<GameEndedEvent>(_s, None);
+        self.room.notify_room::<GameEndedEvent>(_s, None).await;
         // Cleanup the room
         self.room.leave_room(_s);
     }
 
     // Action: Undo the last move in the game session
-    pub fn undo_last_move(&mut self, _s: &SocketRef) -> Result<(), Error> {
+    pub async fn undo_last_move(
+        &mut self,
+        _s: &SocketRef,
+    ) -> Result<(), Error> {
         // check if game session has an active room
         if let Err(err) = self.get_active_room() {
             return Err(err);
         }
 
         // revert the last move in the game state
-        let undo_move = match self.state.undo_last_move() {
+        let undo_moves = match self.state.reset(1) {
             Ok(mv) => mv,
             Err(err) => return Err(err),
         };
 
         // Notify players about the undo action
-        self.room.notify_room::<BoardCellEvent>(
-            _s,
-            Some(BoardCell {
-                x: undo_move.x,
-                y: undo_move.y,
-                player_id: None,
-            }),
-        );
+        for cell in undo_moves {
+            self.room
+                .notify_room::<BoardCellEvent>(_s, Some(cell))
+                .await;
+        }
 
         Ok(())
     }

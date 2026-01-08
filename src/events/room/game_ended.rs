@@ -9,7 +9,7 @@ impl RoomEvent for GameEndedEvent {
 
     type Payload = ();
 
-    fn notify_room(
+    async fn notify_room(
         room_name: String,
         _s: &SocketRef,
         _payload: Option<Self::Payload>,

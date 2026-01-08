@@ -15,12 +15,12 @@ impl Event for UndoEvent {
         Ok(Self {})
     }
 
-    fn on_event_call(
+    async fn on_event_call(
         _game_session: &mut GameSession,
         _s: &SocketRef,
         _payload: Option<Self>,
     ) {
-        if let Err(err) = _game_session.undo_last_move(_s) {
+        if let Err(err) = _game_session.undo_last_move(_s).await {
             Self::on_event_error(_s, err);
         }
     }

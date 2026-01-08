@@ -15,11 +15,11 @@ impl Event for PlayerLeaveEvent {
         Ok(Self {})
     }
 
-    fn on_event_call(
+    async fn on_event_call(
         _game_session: &mut GameSession,
         _s: &SocketRef,
         _payload: Option<Self>,
     ) {
-        _game_session.end_game(_s);
+        _game_session.end_game(_s).await;
     }
 }

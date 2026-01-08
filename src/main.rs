@@ -27,8 +27,8 @@ pub async fn handle_connection(s: SocketRef, config: Config) {
         Arc::new(Mutex::new(GameSession::new(config.board_size)));
 
     // Register event handlers
-    GameStartEvent::register_event(&s, &_game_session);
-    PlayerMoveEvent::register_event(&s, &_game_session);
+    register_event!(GameStartEvent, &s, &_game_session);
+    register_event!(PlayerMoveEvent, &s, &_game_session);
 
     // Handle client disconnection
     let session = Arc::clone(&_game_session);
@@ -36,7 +36,7 @@ pub async fn handle_connection(s: SocketRef, config: Config) {
         let session = Arc::clone(&session);
         async move {
             let mut g = session.lock().await;
-            PlayerLeaveEvent::on_event_call(&mut g, &s, None);
+            PlayerLeaveEvent::on_event_call(&mut g, &s, None).await;
         }
     });
 }

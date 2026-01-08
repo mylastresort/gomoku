@@ -10,12 +10,12 @@ impl RoomEvent for GameStartedEvent {
 
     type Payload = ();
 
-    fn notify_room(
+    async fn notify_room(
         room_name: String,
         _s: &SocketRef,
         _payload: Option<Self::Payload>,
     ) {
-        let _ = _s.to(room_name.clone()).emit(
+        let _ = _s.emit(
             Self::EVENT_NAME,
             &json!({
                 "room": room_name,

@@ -3,23 +3,14 @@ use uuid::Uuid;
 
 use crate::events::room::event::RoomEvent;
 
+#[derive(Default)]
 pub struct Room {
     pub id: String,
-    pub open: bool,
-}
-
-impl Default for Room {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            open: false,
-        }
-    }
 }
 
 impl Room {
     pub fn has_room(&self) -> bool {
-        self.open
+        !self.id.is_empty()
     }
 
     // Function to create and start a game room
@@ -41,14 +32,13 @@ impl Room {
 
     fn clean(&mut self) {
         self.id.clear();
-        self.open = false;
     }
 
-    pub fn notify_room<E: RoomEvent>(
+    pub async fn notify_room<E: RoomEvent>(
         &self,
         _s: &SocketRef,
         _payload: Option<E::Payload>,
     ) {
-        E::notify_room(self.id.clone(), _s, _payload);
+        E::notify_room(self.id.clone(), _s, _payload).await;
     }
 }

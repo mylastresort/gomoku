@@ -3,14 +3,12 @@ use std::io::Error;
 use serde::{Deserialize, Serialize};
 use socketioxide::extract::SocketRef;
 
-use crate::{
-    events::event::Event,
-    game::{session::GameSession, state::GameMove},
-};
+use crate::{events::event::Event, game::session::GameSession};
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct PlayerMoveEvent {
-    pub _move: GameMove,
+    pub x: usize,
+    pub y: usize,
 }
 
 impl Event for PlayerMoveEvent {
@@ -20,7 +18,7 @@ impl Event for PlayerMoveEvent {
         Ok(_payload)
     }
 
-    fn on_event_call(
+    async fn on_event_call(
         _game_session: &mut GameSession,
         _s: &SocketRef,
         _payload: Option<Self>,
@@ -45,7 +43,7 @@ impl Event for PlayerMoveEvent {
             }
         };
 
-        if let Err(err) = _game_session.make_move(_s, event._move) {
+        if let Err(err) = _game_session.make_move(_s, event.x, event.y).await {
             Self::on_event_error(_s, err);
         }
     }
