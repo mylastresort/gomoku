@@ -106,6 +106,8 @@ impl GameState {
         info!("Finding captures for the move");
         let cap = Capture::find_capture(&self.board, &game_move);
 
+        info!("Captures found: {:?}", cap);
+
         info!("Checking for win condition");
 
         let res = GameResult {
@@ -133,6 +135,11 @@ impl GameState {
                 .or_insert_with(HashSet::new);
             info!("Adding capture at move index {}", self.history.len());
             entry.insert(self.history.len());
+            // remove captured pieces from the board
+            for (x, y) in &capture.seq {
+                info!("Removing captured piece at ({}, {})", x, y);
+                self.board[*y][*x] = None;
+            }
         }
 
         // check if there is a winner and finish the game
