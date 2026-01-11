@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::game::{
     capture::Capture,
@@ -54,40 +54,147 @@ impl Win {
         info!("Checking for five in a row win condition");
         info!("Current player: {:?}", game_move.player_id);
 
-        let mut temp_win: Option<Win> = None;
+        let mut flanked_win: Option<Win> = None;
 
         for (dx, dy) in [(1, 0), (0, 1), (1, 1), (1, -1)] {
             if let Some(win) =
                 Self::check_direction_for_win(board, game_move, dx, dy)
             {
-                // If not flanked, return immediately
+                // return immediately if non-flanked win found
                 if !win.is_flanked {
                     info!("Non-flanked win found, returning immediately");
                     return Some(win);
-                }
-
-                // Store flanked win and continue checking other directions
-                if temp_win.is_none() {
+                } else {
                     info!(
-                        "Storing flanked win temporarily, checking other directions"
+                        "Flanked win detected - storing for potential win next turn"
                     );
-                    temp_win = Some(win);
+                    flanked_win = Some(win);
                 }
             }
         }
 
-        // Return temporary win if found (even if flanked)
-        temp_win
+        // Return flanked win if found (opponent has a chance to cut the line)
+        flanked_win
+    }
+
+    fn check_flanked_in_direction(
+        board: &Vec<Vec<Option<Player>>>,
+        x: usize,
+        y: usize,
+        dx: isize,
+        dy: isize,
+        current_player: Player,
+    ) -> bool {
+        let opponent = current_player.opponent();
+
+        // Count stones in both directions from current position
+        let mut count = 1; // Start with current stone
+        let mut forward_steps = 0;
+        let mut backward_steps = 0;
+
+        // Count forward
+        let mut i = 1;
+        loop {
+            let nx = x as isize + i * dx;
+            let ny = y as isize + i * dy;
+
+            if !Self::is_position_in_bounds(board, nx, ny) {
+                break;
+            }
+
+            if board[ny as usize][nx as usize] == Some(current_player) {
+                count += 1;
+                forward_steps = i;
+                i += 1;
+            } else {
+                break;
+            }
+        }
+
+        // Count backward
+        let mut i = 1;
+        loop {
+            let nx = x as isize - i * dx;
+            let ny = y as isize - i * dy;
+
+            if !Self::is_position_in_bounds(board, nx, ny) {
+                break;
+            }
+
+            if board[ny as usize][nx as usize] == Some(current_player) {
+                count += 1;
+                backward_steps = i;
+                i += 1;
+            } else {
+                break;
+            }
+        }
+
+        // Check if exactly 2 stones
+        if count != 2 {
+            return false;
+        }
+
+        // Get edge cells
+        let forward_edge_x = x as isize + (forward_steps + 1) * dx;
+        let forward_edge_y = y as isize + (forward_steps + 1) * dy;
+        let backward_edge_x = x as isize - (backward_steps + 1) * dx;
+        let backward_edge_y = y as isize - (backward_steps + 1) * dy;
+
+        // Check if edges are in bounds
+        let forward_in_bounds =
+            Self::is_position_in_bounds(board, forward_edge_x, forward_edge_y);
+        let backward_in_bounds = Self::is_position_in_bounds(
+            board,
+            backward_edge_x,
+            backward_edge_y,
+        );
+
+        // Skip if one edge is out of bounds
+        if !forward_in_bounds || !backward_in_bounds {
+            return false;
+        }
+
+        let forward_edge =
+            board[forward_edge_y as usize][forward_edge_x as usize];
+        let backward_edge =
+            board[backward_edge_y as usize][backward_edge_x as usize];
+
+        // Check if one edge is empty and other is opponent
+        let flanked = (forward_edge.is_none()
+            && backward_edge == Some(opponent))
+            || (forward_edge == Some(opponent) && backward_edge.is_none());
+
+        if flanked {
+            warn!(
+                "Flanked found at ({}, {}) in direction ({}, {}): {} stones with edges {:?} and {:?}",
+                x, y, dx, dy, count, backward_edge, forward_edge
+            );
+        }
+
+        flanked
     }
 
     fn check_flanked(
-        _board: &Vec<Vec<Option<Player>>>,
-        _x: usize,
-        _y: usize,
-        _dx: isize,
-        _dy: isize,
-        _current_player: Player,
+        board: &Vec<Vec<Option<Player>>>,
+        x: usize,
+        y: usize,
+        current_player: Player,
     ) -> bool {
+        // Check all four directions: horizontal, vertical, and both diagonals
+        for (dx, dy) in [(1, 0), (0, 1), (1, 1), (1, -1)] {
+            if Self::check_flanked_in_direction(
+                board,
+                x,
+                y,
+                dx,
+                dy,
+                current_player,
+            ) {
+                return true;
+            }
+        }
+
         false
     }
 
@@ -108,10 +215,9 @@ impl Win {
         direction_multiplier: isize,
         current_player: Player,
         win_seq: &mut Vec<(usize, usize)>,
-    ) -> (usize, bool) {
+    ) -> usize {
         info!("Counting stones in direction: {}", direction_multiplier);
         let mut stones = 0;
-        let mut is_flanked = false;
         let mut j = 1;
 
         loop {
@@ -140,18 +246,7 @@ impl Win {
                     win_seq.push((nx as usize, ny as usize));
                 }
                 Some(_) => {
-                    info!(
-                        "Found opponent's stone at ({}, {}), checking for flanking",
-                        nx, ny
-                    );
-                    is_flanked = Self::check_flanked(
-                        board,
-                        nx as usize,
-                        ny as usize,
-                        dx,
-                        dy,
-                        current_player,
-                    );
+                    info!("Found opponent's stone at ({}, {})", nx, ny);
                     break;
                 }
                 None => break,
@@ -159,7 +254,7 @@ impl Win {
             j += 1;
         }
 
-        (stones, is_flanked)
+        stones
     }
 
     fn check_direction_for_win(
@@ -180,7 +275,7 @@ impl Win {
 
         // Count stones in both directions
         for direction in [-1, 1] {
-            let (count, flanked) = Self::count_stones_in_direction(
+            let count = Self::count_stones_in_direction(
                 board,
                 game_move.x,
                 game_move.y,
@@ -191,12 +286,25 @@ impl Win {
                 &mut win_seq,
             );
             stones += count;
-            is_flanked = is_flanked || flanked;
         }
 
         info!("Total stones in a row: {}", stones);
 
         if stones >= Self::STONES_TO_WIN {
+            // Check if any stone in the winning sequence can be flanked
+            for (stone_x, stone_y) in &win_seq {
+                if Self::check_flanked(
+                    board,
+                    *stone_x,
+                    *stone_y,
+                    current_player,
+                ) {
+                    is_flanked = true;
+                    info!("Stone at ({}, {}) can be flanked", stone_x, stone_y);
+                    break;
+                }
+            }
+
             info!(
                 "Player {:?} has five in a row! (flanked: {})",
                 current_player, is_flanked

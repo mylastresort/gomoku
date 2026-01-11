@@ -27,7 +27,7 @@ impl Default for GameState {
 
 impl GameResult {
     pub fn winner(&self) -> Option<Win> {
-        self.win.as_ref().filter(|win| !win.is_flanked).cloned()
+        self.win.as_ref().filter(|w| !w.is_flanked).cloned()
     }
 }
 
@@ -123,7 +123,11 @@ impl GameState {
             &self.captures,
         )
         .or_else(|| {
-            if let Some(mut winner) = self.get_last_game_winner() {
+            info!("No win found from current move, checking last game winner");
+            if captures.is_none()
+                && let Some(mut winner) = self.get_last_game_winner()
+            {
+                info!("Last game winner found: {:?}", winner);
                 winner.is_flanked = false;
                 return Some(winner);
             }
