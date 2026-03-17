@@ -7,6 +7,7 @@ import { Board } from "@/components/gomoku/Board"
 import { RightPanel } from "@/components/gomoku/RightPanel"
 import { SettingsDialog } from "@/components/gomoku/SettingsDialog"
 import { EndgameDialog } from "@/components/gomoku/EndgameDialog"
+import { LoadingModal } from "@/components/gomoku/LoadingModal"
 import { useToast } from "@/components/ui/toast"
 import {
   gameClient,
@@ -49,6 +50,7 @@ export function GamePage({ mode }: { mode: GameMode }) {
 
   const [onlineSearching, setOnlineSearching] = React.useState(false)
   const [onlineColor, setOnlineColor] = React.useState<"black" | "white" | null>(null)
+  const [aiBooting, setAiBooting] = React.useState(mode === "ai")
 
   const [gameState, setGameState] = React.useState<GameState>(() => ({
     board: createBoard(defaultSettings.boardSize),
@@ -173,22 +175,25 @@ export function GamePage({ mode }: { mode: GameMode }) {
   }, [settings.boardSize, toast])
 
   React.useEffect(() => {
-    // Auto-start for AI and Online pages.
-    if (mode === "ai" && gameClient.isConnected()) {
-      gameClient.startGame(settings.boardSize, "ai").catch((e) => {
-        toast(`Failed to start AI game: ${e}`, "destructive")
-      })
-      setGameState((prev) => ({ ...prev, status: "playing" }))
-    }
+    // If user lands directly on /online, auto-start matchmaking (unless already playing).
     if (mode === "online") {
-      // Stay on a waiting state until match starts.
+      if (gameState.status !== "playing" && !onlineSearching) {
+        setGameState((prev) => ({ ...prev, status: "waiting" }))
+        startOnlineMatch()
+      }
+    }
+
+    // AI mode not implemented yet: keep user in a loading modal.
+    if (mode === "ai") {
+      setAiBooting(true)
       setGameState((prev) => ({ ...prev, status: "waiting" }))
     }
-  }, [mode, settings.boardSize, toast])
+  }, [mode, gameState.status, onlineSearching, startOnlineMatch])
 
   const handleExit = React.useCallback(async () => {
     setOnlineSearching(false)
     setOnlineColor(null)
+    setAiBooting(false)
 
     if ((mode === "online" || mode === "ai") && gameClient.isConnected()) {
       try {
@@ -287,48 +292,19 @@ export function GamePage({ mode }: { mode: GameMode }) {
 
   const showEndgameDialog = gameState.status === "finished" && gameState.winner !== null
 
-  // Online page has an explicit waiting state before matchmaking
-  if (mode === "online" && gameState.status === "waiting") {
-    return (
-      <div className="flex flex-col min-h-screen">
-        <Header connectionStatus={connectionStatus} onSettingsClick={() => setSettingsOpen(true)} />
-        <main className="flex-1 flex items-center justify-center p-4">
-          <div className="w-full max-w-md flex flex-col gap-3 text-center">
-            <div className="text-2xl font-bold">Online Match</div>
-            <div className="text-muted-foreground">
-              {onlineSearching ? "Searching for an opponent…" : "Ready when you are."}
-            </div>
-            <div className="flex flex-col gap-2 pt-2">
-              <button
-                className="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground h-10 px-4 py-2 disabled:opacity-50"
-                onClick={startOnlineMatch}
-                disabled={onlineSearching}
-              >
-                {onlineSearching ? "Searching…" : "Find match"}
-              </button>
-              <button
-                className="inline-flex items-center justify-center rounded-md border h-10 px-4 py-2"
-                onClick={handleExit}
-              >
-                Exit
-              </button>
-            </div>
-          </div>
-        </main>
-        <SettingsDialog
-          open={settingsOpen}
-          onOpenChange={setSettingsOpen}
-          settings={settings}
-          onSettingsChange={(s) => setSettings((prev) => ({ ...prev, ...s }))}
-          mode={mode}
-        />
-      </div>
-    )
-  }
-
   return (
     <div className="flex flex-col min-h-screen">
       <Header connectionStatus={connectionStatus} onSettingsClick={() => setSettingsOpen(true)} />
+      <LoadingModal
+        open={mode === "online" && gameState.status !== "playing"}
+        title="Finding match"
+        description="Waiting for another player to join…"
+      />
+      <LoadingModal
+        open={mode === "ai" && aiBooting}
+        title="Starting AI game"
+        description="AI mode is not implemented yet."
+      />
       <main className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-4 p-4 container mx-auto">
         <div className="flex items-center justify-center min-h-0">
           <Board
