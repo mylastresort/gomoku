@@ -24,8 +24,10 @@ impl Room {
 
     // Cleanup function to end a game room
     pub fn leave_room(&mut self, _s: &SocketRef) {
-        let room_id = _s.id;
-        _s.leave(room_id);
+        let room_id = self.id.clone();
+        if !room_id.is_empty() {
+            _s.leave(room_id);
+        }
 
         self.clean();
     }

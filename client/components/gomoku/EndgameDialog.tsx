@@ -48,7 +48,7 @@ export function EndgameDialog({
         </DialogHeader>
         <div className="flex flex-col gap-2 pt-4">
           <Button onClick={onNewGame} className="w-full">
-            New Game
+            Restart
           </Button>
           <Button
             variant="outline"

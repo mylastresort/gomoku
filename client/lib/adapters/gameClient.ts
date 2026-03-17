@@ -24,6 +24,12 @@ export interface GameStartedPayload {
   room: string
 }
 
+export interface MatchFoundPayload {
+  room: string
+  color: "White" | "Black"
+  board_size: number
+}
+
 export interface GameWinPayload {
   player_id: "White" | "Black"
   seq: number[] | null
@@ -50,6 +56,7 @@ export interface RoomErrorPayload {
 
 // Event handlers type
 export interface GameEventHandlers {
+  onMatchFound?: (payload: MatchFoundPayload) => void
   onGameStarted?: (payload: GameStartedPayload) => void
   onBoardCell?: (payload: BoardCellPayload) => void
   onGameTurn?: (payload: GameTurnPayload) => void
@@ -125,7 +132,10 @@ class GameClient {
       })
 
       this.socket.on("connect_error", (error) => {
-        console.error("✗ Connection error:", error)
+        // Surface via UI handlers; no console.error (per project rule)
+        const message =
+          typeof error?.message === "string" ? error.message : "Connection error"
+        this.eventHandlers.onEventError?.(message)
         this.status = "offline"
         this.notifyStatusListeners()
         reject(error)
@@ -141,6 +151,12 @@ class GameClient {
    */
   private registerGameEvents(): void {
     if (!this.socket) return
+
+    // match-found event
+    this.socket.on("match-found", (payload: MatchFoundPayload) => {
+      console.log("Match found:", payload)
+      this.eventHandlers.onMatchFound?.(payload)
+    })
 
     // game-started event
     this.socket.on("game-started", (payload: GameStartedPayload) => {
@@ -180,13 +196,11 @@ class GameClient {
 
     // event-error event - errors from event processing
     this.socket.on("event-error", (error: string) => {
-      console.error("Event error:", error)
       this.eventHandlers.onEventError?.(error)
     })
 
     // room-error event - errors from room operations
     this.socket.on("room-error", (error: string) => {
-      console.error("Room error:", error)
       this.eventHandlers.onRoomError?.(error)
     })
   }
@@ -252,6 +266,19 @@ class GameClient {
     // Emit without acknowledgment callback
     this.socket.emit("game-start", payload)
     console.log("game-start event emitted")
+  }
+
+  /**
+   * Find a 1v1 online match (matchmaking)
+   */
+  async findMatch(boardSize: number): Promise<void> {
+    if (!this.socket?.connected) {
+      throw new Error("Not connected to server")
+    }
+
+    const payload = { board_size: boardSize }
+    console.log("Sending find-match event:", payload)
+    this.socket.emit("find-match", payload)
   }
 
   /**

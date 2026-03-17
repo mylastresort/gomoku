@@ -15,11 +15,10 @@ impl RoomEvent for GameStartedEvent {
         _s: &SocketRef,
         _payload: Option<Self::Payload>,
     ) {
-        let _ = _s.emit(
-            Self::EVENT_NAME,
-            &json!({
-                "room": room_name,
-            }),
-        );
+        let room = room_name.clone();
+        let payload = json!({
+            "room": room_name,
+        });
+        let _ = _s.within(room).emit(Self::EVENT_NAME, &payload).await;
     }
 }

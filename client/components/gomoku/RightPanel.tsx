@@ -4,28 +4,27 @@ import * as React from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Separator } from "@/components/ui/separator"
 import { MoveList } from "./MoveList"
 import type { GameState, GameMode } from "@/lib/gomoku/types"
-import { RotateCcw, RefreshCw, Flag } from "lucide-react"
+import { RotateCcw, RefreshCw, Flag, LogOut } from "lucide-react"
 
 interface RightPanelProps {
   gameState: GameState
   mode: GameMode
-  onModeChange: (mode: GameMode) => void
   onUndo: () => void
   onRestart: () => void
   onResign: () => void
+  onExit: () => void
 }
 
 export function RightPanel({
   gameState,
   mode,
-  onModeChange,
   onUndo,
   onRestart,
   onResign,
+  onExit,
 }: RightPanelProps) {
   const canUndo = gameState.moves.length > 0
 
@@ -36,13 +35,17 @@ export function RightPanel({
           <CardTitle>Match</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <Tabs value={mode} onValueChange={(v) => onModeChange(v as GameMode)}>
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="local">Local</TabsTrigger>
-              <TabsTrigger value="ai">vs AI</TabsTrigger>
-              <TabsTrigger value="online">Online</TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <div className="flex items-center justify-between">
+            <Badge variant="outline">
+              {mode === "local" && "Local"}
+              {mode === "ai" && "vs AI"}
+              {mode === "online" && "Online"}
+            </Badge>
+            <Button variant="outline" size="sm" onClick={onExit}>
+              <LogOut className="h-4 w-4 mr-2" />
+              Exit
+            </Button>
+          </div>
 
           <Separator />
 
