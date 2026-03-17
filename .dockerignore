@@ -1,0 +1,24 @@
+**/.DS_Store
+**/.idea
+**/.vscode
+**/.git
+**/.gitignore
+
+# Rust
+target
+**/target
+
+# Node / Next
+client/node_modules
+client/.next
+client/out
+client/.turbo
+client/npm-debug.log
+client/yarn-debug.log
+client/yarn-error.log
+client/pnpm-debug.log
+
+# Env / secrets
+**/.env
+**/.env.*
+

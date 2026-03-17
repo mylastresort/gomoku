@@ -1,0 +1,23 @@
+FROM rust:1.88-bookworm AS base
+WORKDIR /app
+
+FROM base AS dev
+RUN cargo install cargo-watch --locked
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+RUN cargo fetch
+EXPOSE 8000
+CMD ["cargo", "watch", "-x", "run -- --port 8000"]
+
+FROM base AS build
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+RUN cargo build --release
+
+FROM debian:bookworm-slim AS prod
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget \
+  && rm -rf /var/lib/apt/lists/*
+COPY --from=build /app/target/release/gomoku /app/gomoku
+EXPOSE 8000
+CMD ["./gomoku", "--port", "8000"]
