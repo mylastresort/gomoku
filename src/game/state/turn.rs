@@ -6,7 +6,7 @@ use crate::{
 impl GameTurn {
     pub fn update(&mut self, current_player: &Player, _board: &Board) {
         self.turn += 1;
-        self.current_player = current_player.opponent();
+        self.current_player = *current_player;
         self.forbidden_sequences =
             Self::get_forbidden_moves(_board, &self.current_player);
     }

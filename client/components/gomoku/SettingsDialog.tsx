@@ -10,7 +10,6 @@ import {
   DialogClose,
 } from "@/components/ui/dialog"
 import { Separator } from "@/components/ui/separator"
-import { Select } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Slider } from "@/components/ui/slider"
 import type { GameSettings, GameMode } from "@/lib/gomoku/types"
@@ -41,23 +40,6 @@ export function SettingsDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-6 py-4">
-          <div className="flex flex-col gap-2">
-            <label className="text-sm font-medium">Board Size</label>
-            <Select
-              value={String(settings.boardSize)}
-              onChange={(e) =>
-                onSettingsChange({
-                  boardSize: Number(e.target.value) as 15 | 19,
-                })
-              }
-            >
-              <option value="15">15x15</option>
-              <option value="19">19x19</option>
-            </Select>
-          </div>
-
-          <Separator />
-
           <div className="flex items-center justify-between">
             <div className="flex flex-col gap-1">
               <label className="text-sm font-medium">Show Coordinates</label>

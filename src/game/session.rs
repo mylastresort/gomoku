@@ -4,6 +4,7 @@ use socketioxide::extract::SocketRef;
 use tracing::info;
 
 use crate::{
+    bridge::{PythonBridgeConfig, invoke_python_ai_from_game_state},
     events::room::{
         board::BoardCellEvent, game_ended::GameEndedEvent,
         game_started::GameStartedEvent, game_turn::GameTurnEvent,
@@ -94,6 +95,100 @@ impl GameSession {
         }
     }
 
+    async fn apply_and_emit_move(
+        &mut self,
+        _s: &SocketRef,
+        x: usize,
+        y: usize,
+        notify_next_turn: bool,
+    ) -> Result<bool, Error> {
+        info!("Applying move to game state");
+        let game_result = self.state.apply_move(x, y)?;
+
+        let Some(res) = game_result else {
+            return Ok(self.state.status == GameStatus::Ongoing);
+        };
+
+        info!("Notifying players about the board cell update");
+        self.room
+            .notify_room::<BoardCellEvent>(_s, Some(res.game_move.into()))
+            .await;
+
+        info!("Move resulted in a game result: {:?}", res);
+        if let Some(capture) = &res.capture {
+            info!(
+                "Player {:?} made a capture of {} pieces",
+                capture.player_id,
+                capture.seq.len()
+            );
+            capture.emit(_s, self).await;
+        }
+
+        let winner = res.winner();
+        if let Some(winner) = winner {
+            info!("Player {:?} has won the game!", winner.player_id);
+            self.room
+                .notify_room::<GameWinEvent>(_s, Some(winner))
+                .await;
+        }
+
+        info!("Updating game state with the move");
+        self.state.commit(res)?;
+        self.print_board();
+
+        if self.state.status == GameStatus::Finished {
+            info!("Ending game session");
+            self.end_game(_s).await;
+            return Ok(false);
+        }
+
+        if notify_next_turn {
+            info!(
+                "Notifying about next turn for player {:?}",
+                self.state.get_current_player()
+            );
+            self.room
+                .notify_room::<GameTurnEvent>(_s, Some(self.state.turn.clone()))
+                .await;
+        }
+
+        Ok(true)
+    }
+
+    async fn play_ai_move(&mut self, _s: &SocketRef) -> Result<(), Error> {
+        if self.state.status != GameStatus::Ongoing {
+            return Ok(());
+        }
+
+        if self.state.get_current_player() != Player::White {
+            return Ok(());
+        }
+
+        info!("Requesting Python AI move");
+        let ai_move = invoke_python_ai_from_game_state(
+            &PythonBridgeConfig::default(),
+            &self.state,
+            Player::White,
+        )
+        .map_err(|err| {
+            Error::new(
+                std::io::ErrorKind::Other,
+                format!("Python AI failed: {err}"),
+            )
+        })?;
+
+        let Some((x, y)) = ai_move else {
+            return Err(Error::new(
+                std::io::ErrorKind::Other,
+                "Python AI did not return a move",
+            ));
+        };
+
+        info!("Python AI selected move at ({}, {})", x, y);
+        self.apply_and_emit_move(_s, x, y, true).await?;
+        Ok(())
+    }
+
     // Action: Start a new game session
     // creates a room once and notifies players that the game when started
     pub async fn start_game(
@@ -103,6 +198,7 @@ impl GameSession {
         _mode: GameMode,
     ) {
         self.state = GameState::new(board_size);
+        self.mode = _mode;
         // Create a room and join players to push game events
         self.room.join_room(_s);
         // send notification to all players in the room that the game has started
@@ -127,66 +223,23 @@ impl GameSession {
             return Err(err);
         }
 
-        info!("Applying move to game state");
-
-        // apply the move to the game state
-        let game_result = match self.state.apply_move(x, y) {
-            Ok(res) => res,
-            Err(err) => return Err(err),
-        };
-
-        info!("Notifying players about the move");
-
-        // check if there is a win
-        if let Some(res) = game_result {
-            // notify players about the move
-            info!("Notifying players about the board cell update");
-            self.room
-                .notify_room::<BoardCellEvent>(_s, Some(res.game_move.into()))
-                .await;
-            info!("Move resulted in a game result: {:?}", res);
-            // notify players about the captures
-            if let Some(capture) = &res.capture {
-                info!(
-                    "Player {:?} made a capture of {} pieces",
-                    capture.player_id,
-                    capture.seq.len()
-                );
-                // emit captures
-                capture.emit(_s, self).await;
-            }
-            if let Some(winner) = res.winner() {
-                info!("Player {:?} has won the game!", winner.player_id);
-                // notify players about the win
-                self.room
-                    .notify_room::<GameWinEvent>(_s, Some(winner))
-                    .await;
-                // set game status to finished
-                info!("Ending game session");
-                self.end_game(_s).await;
-            }
-            info!("Updating game state with the move");
-            // commit the result
-            self.state.commit(res)?;
-
-            // Print the board after updating
-            self.print_board();
-
-            // If game is still ongoing, notify about the next turn
-            if self.state.status == GameStatus::Ongoing {
-                let current_player = self.state.get_current_player();
-                info!(
-                    "Notifying about next turn for player {:?}",
-                    current_player
-                );
-                self.room
-                    .notify_room::<GameTurnEvent>(
-                        _s,
-                        Some(self.state.turn.clone()),
-                    )
-                    .await;
-            }
+        if self.mode == GameMode::PvE
+            && self.state.get_current_player() != Player::Black
+        {
+            return Err(Error::new(
+                std::io::ErrorKind::Other,
+                "Waiting for the AI move",
+            ));
         }
+
+        if self.mode == GameMode::PvE {
+            if self.apply_and_emit_move(_s, x, y, false).await? {
+                self.play_ai_move(_s).await?;
+            }
+            return Ok(());
+        }
+
+        self.apply_and_emit_move(_s, x, y, true).await?;
 
         Ok(())
     }

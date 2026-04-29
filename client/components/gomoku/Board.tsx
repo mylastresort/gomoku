@@ -14,6 +14,8 @@ interface BoardProps {
   forbiddenMoves?: Array<[number, number]>
 }
 
+type IndexedForbiddenCell = Record<0 | 1, number>
+
 export function Board({
   board,
   lastMove,
@@ -23,10 +25,24 @@ export function Board({
   disabled = false,
   forbiddenMoves = [],
 }: BoardProps) {
+  const containerRef = React.useRef<HTMLDivElement | null>(null)
+  const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 })
   const [hoveredCell, setHoveredCell] = React.useState<{
     row: number
     col: number
   } | null>(null)
+
+  React.useEffect(() => {
+    if (!containerRef.current) return
+    const el = containerRef.current
+    const ro = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect
+      if (!rect) return
+      setContainerSize({ width: Math.floor(rect.width), height: Math.floor(rect.height) })
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   React.useEffect(() => {
     console.log("Forbidden moves updated:", forbiddenMoves)
@@ -53,8 +69,9 @@ export function Board({
           }
           return matches
         } else if (typeof cell === "object" && cell !== null) {
-          const x = (cell as any)[0]
-          const y = (cell as any)[1]
+          const indexedCell = cell as IndexedForbiddenCell
+          const x = indexedCell[0]
+          const y = indexedCell[1]
           const matches = x === col && y === row
           if (matches) {
             console.log(`Cell [${row}, ${col}] is forbidden! Matched object [${x}, ${y}]`)
@@ -91,16 +108,22 @@ export function Board({
   )
 
   const size = board.length
-  const maxSize = Math.min(
-    typeof window !== "undefined" ? window.innerWidth - 64 : 600,
-    typeof window !== "undefined" ? window.innerHeight - 200 : 600
+  const viewportHeight =
+    typeof window === "undefined" ? 720 : Math.max(480, window.innerHeight - 160)
+  const effectiveHeight = Math.max(containerSize.height || 0, viewportHeight)
+  const maxSize = Math.max(
+    240,
+    Math.min(
+      (containerSize.width || 720) - 32,
+      effectiveHeight - 32
+    )
   )
   const cellSize = Math.floor(maxSize / size)
 
   return (
-    <div className="flex items-center justify-center p-4">
+    <div ref={containerRef} className="flex w-full h-full min-h-[320px] items-center justify-center p-2 sm:p-4">
       <div
-        className="grid gap-0 bg-amber-50 dark:bg-amber-950/20 border-2 border-amber-200 dark:border-amber-900/50 rounded-lg p-2 shadow-lg"
+        className="grid gap-0 rounded-xl border border-black/10 dark:border-white/10 bg-linear-to-br from-[#f1d7a6] via-[#e8c78e] to-[#dbb46e] dark:from-[#2a241a] dark:via-[#241f18] dark:to-[#1a1712] p-2 shadow-lg shadow-black/10"
         style={{
           gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))`,
           width: `${cellSize * size + 16}px`,
@@ -120,6 +143,7 @@ export function Board({
               showCoordinates={showCoordinates}
               onCellClick={onCellClick}
               onCellHover={handleCellHover}
+              disabled={disabled}
               hoverStone={
                 hoveredCell?.row === rowIndex && hoveredCell?.col === colIndex
                   ? currentPlayer

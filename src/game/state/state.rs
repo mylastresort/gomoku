@@ -127,11 +127,19 @@ impl GameState {
         info!("Captures found: {:?}", captures);
 
         info!("Checking for win condition");
+        let mut board_after_move = self.board.clone();
+        board_after_move[game_move.y][game_move.x] = Some(game_move.player_id);
+
+        if let Some(capture) = &captures {
+            for (x, y) in &capture.seq {
+                board_after_move[*y][*x] = None;
+            }
+        }
 
         let winner = Win::check_for_win(
             &game_move,
             &captures,
-            &self.board,
+            &board_after_move,
             &self.captures,
         )
         .or_else(|| {
@@ -189,7 +197,12 @@ impl GameState {
         // add the result to history
         self.history.push(result);
         info!("Updating turn information");
-        self.turn.update(&self.get_current_player(), &self.board);
+        let next_player = self
+            .history
+            .last()
+            .map(|r| r.game_move.player_id.opponent())
+            .unwrap_or(Player::Black);
+        self.turn.update(&next_player, &self.board);
         Ok(())
     }
 
