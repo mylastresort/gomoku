@@ -35,7 +35,7 @@ pub struct GameResult {
     pub win: Option<Win>,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 pub enum GameStatus {
     Ongoing,
     Finished,

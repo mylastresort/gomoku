@@ -1,6 +1,6 @@
 export type Stone = "black" | "white" | null
 
-export type GameMode = "local" | "ai" | "online"
+export type GameMode = "local" | "ai"
 
 export type GameStatus = "waiting" | "playing" | "finished"
 
@@ -35,7 +35,7 @@ export type GameState = {
 }
 
 export type GameSettings = {
-  boardSize: 15 | 19
+  boardSize: 19
   showCoordinates: boolean
   soundEnabled: boolean
   aiDifficulty: number

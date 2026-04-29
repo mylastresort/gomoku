@@ -1,4 +1,4 @@
-import type { Stone, Move, GameState } from "./types"
+import type { Stone, Move } from "./types"
 
 export function createBoard(size: number): Stone[][] {
   return Array(size)

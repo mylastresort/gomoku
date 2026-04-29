@@ -6,10 +6,10 @@ import { Board } from "@/components/gomoku/Board"
 import { RightPanel } from "@/components/gomoku/RightPanel"
 import { SettingsDialog } from "@/components/gomoku/SettingsDialog"
 import { EndgameDialog } from "@/components/gomoku/EndgameDialog"
-import { Card, CardContent } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/toast"
-import { gameClient, type BoardCellPayload, type GameStartedPayload, type GameWinPayload, type GameEndedPayload, type GameTurnPayload } from "@/lib/adapters/gameClient"
+import { gameClient, type BoardCellPayload, type ConnectionStatus, type GameStartedPayload, type GameTurnPayload } from "@/lib/adapters/gameClient"
 import {
   createBoard,
   placeMove,
@@ -21,20 +21,53 @@ import type {
   GameState,
   GameMode,
   GameSettings,
-  Player,
   Stone,
 } from "@/lib/gomoku/types"
 
 const defaultSettings: GameSettings = {
-  boardSize: 15,
+  boardSize: 19,
   showCoordinates: false,
   soundEnabled: false,
   aiDifficulty: 3,
 }
 
-const defaultPlayers = {
+const localPlayers = {
   black: { id: "1", name: "Player 1", color: "black" as const },
   white: { id: "2", name: "Player 2", color: "white" as const },
+}
+
+const aiPlayers = {
+  black: localPlayers.black,
+  white: { id: "ai", name: "AI", color: "white" as const },
+}
+
+function getPlayers(mode: GameMode) {
+  return mode === "ai" ? aiPlayers : localPlayers
+}
+
+type AiLogEntry = {
+  id: number
+  message: string
+  timestamp: string
+}
+
+type AiMetrics = {
+  moveCount: number
+  lastMoveMs: number | null
+  averageMoveMs: number | null
+  lastServerMs: number | null
+  logs: AiLogEntry[]
+}
+
+const HUMAN_PLAYER = "black" as const
+const AI_PLAYER = "white" as const
+
+function isForbiddenMove(
+  row: number,
+  col: number,
+  forbiddenMoves: Array<[number, number]>
+) {
+  return forbiddenMoves.some(([x, y]) => x === col && y === row)
 }
 
 export default function Home() {
@@ -42,8 +75,21 @@ export default function Home() {
   const [settings, setSettings] = React.useState<GameSettings>(defaultSettings)
   const [settingsOpen, setSettingsOpen] = React.useState(false)
   const [connectionStatus, setConnectionStatus] =
-    React.useState<"connecting" | "online" | "offline">("offline")
+    React.useState<ConnectionStatus>("offline")
   const [mode, setMode] = React.useState<GameMode>("local")
+  const [aiThinking, setAiThinking] = React.useState(false)
+  const [aiError, setAiError] = React.useState<string | null>(null)
+  const [startingAiGame, setStartingAiGame] = React.useState(false)
+  const [aiMetrics, setAiMetrics] = React.useState<AiMetrics>({
+    moveCount: 0,
+    lastMoveMs: null,
+    averageMoveMs: null,
+    lastServerMs: null,
+    logs: [],
+  })
+  const modeRef = React.useRef<GameMode>("local")
+  const aiLogIdRef = React.useRef(0)
+  const aiTurnStartedAtRef = React.useRef<number | null>(null)
   const [gameState, setGameState] = React.useState<GameState>(() => ({
     board: createBoard(defaultSettings.boardSize),
     currentPlayer: "black",
@@ -53,9 +99,42 @@ export default function Home() {
     winner: null,
     boardSize: defaultSettings.boardSize,
     mode: "local",
-    players: defaultPlayers,
+    players: getPlayers("local"),
     forbiddenMoves: [],
   }))
+
+  React.useEffect(() => {
+    modeRef.current = mode
+  }, [mode])
+
+  const addAiLog = React.useCallback((message: string) => {
+    aiLogIdRef.current += 1
+    const id = aiLogIdRef.current
+
+    setAiMetrics((prev) => ({
+      ...prev,
+      logs: [
+        {
+          id,
+          message,
+          timestamp: new Date().toLocaleTimeString(),
+        },
+        ...prev.logs,
+      ].slice(0, 8),
+    }))
+  }, [])
+
+  const resetAiMetrics = React.useCallback(() => {
+    setAiMetrics({
+      moveCount: 0,
+      lastMoveMs: null,
+      averageMoveMs: null,
+      lastServerMs: null,
+      logs: [],
+    })
+    aiTurnStartedAtRef.current = null
+    aiLogIdRef.current = 0
+  }, [])
 
   // Setup connection status listener
   React.useEffect(() => {
@@ -63,10 +142,9 @@ export default function Home() {
     return unsubscribe
   }, [])
 
-  // Connect to WebSocket server on page load
   React.useEffect(() => {
     console.log("Attempting to connect to WebSocket server...")
-    gameClient.connect("online").then(() => {
+    gameClient.connect().then(() => {
       console.log("Connection successful")
     }).catch((error) => {
       console.error("Failed to connect:", error)
@@ -80,14 +158,17 @@ export default function Home() {
       console.log("Disconnecting from server")
       gameClient.disconnect()
     }
-  }, [])
+  }, [toast])
 
   // Setup WebSocket event handlers
   React.useEffect(() => {
     gameClient.setEventHandlers({
       onGameStarted: (payload: GameStartedPayload) => {
         console.log("Game started in room:", payload.room)
-        toast(`Game started!`, "default")
+        setStartingAiGame(false)
+        setAiError(null)
+        setAiThinking(false)
+        toast("Game started!", "default")
         
         // Now show the game board
         setGameState((prev) => ({
@@ -97,19 +178,69 @@ export default function Home() {
       },
       onBoardCell: (payload: BoardCellPayload) => {
         console.log("Received board cell update:", payload)
+
+        if (
+          payload.y < 0 ||
+          payload.y >= defaultSettings.boardSize ||
+          payload.x < 0 ||
+          payload.x >= defaultSettings.boardSize
+        ) {
+          console.warn("Ignoring out-of-bounds board-cell payload:", payload)
+          return
+        }
         
         // Convert backend player format to frontend format
         const playerColor: Stone = payload.player_id === "Black" ? "black" : 
                                    payload.player_id === "White" ? "white" : null
+
+        if (modeRef.current === "ai") {
+          if (playerColor === HUMAN_PLAYER) {
+            aiTurnStartedAtRef.current = performance.now()
+            setAiThinking(true)
+            addAiLog(`Human played ${String.fromCharCode(65 + payload.x)}${payload.y + 1}`)
+            addAiLog("Waiting for backend Python AI")
+          } else if (playerColor === AI_PLAYER) {
+            const finishedAt = performance.now()
+            const totalMs = aiTurnStartedAtRef.current
+              ? Math.round(finishedAt - aiTurnStartedAtRef.current)
+              : null
+
+            if (totalMs !== null) {
+              setAiMetrics((prev) => {
+                const moveCount = prev.moveCount + 1
+                const previousTotal = (prev.averageMoveMs ?? 0) * prev.moveCount
+                return {
+                  ...prev,
+                  moveCount,
+                  lastMoveMs: totalMs,
+                  averageMoveMs: Math.round((previousTotal + totalMs) / moveCount),
+                  lastServerMs: totalMs,
+                }
+              })
+              addAiLog(
+                `AI played ${String.fromCharCode(65 + payload.x)}${payload.y + 1} in ${totalMs}ms`
+              )
+            }
+
+            setAiThinking(false)
+            setAiError(null)
+            aiTurnStartedAtRef.current = null
+          }
+        }
         
         // Update the board with the move (or clear it if playerColor is null)
         setGameState((prev) => {
           const newBoard = prev.board.map((row) => [...row])
+
+          if (playerColor !== null && newBoard[payload.y][payload.x] === playerColor) {
+            return prev
+          }
+
           newBoard[payload.y][payload.x] = playerColor
           
           let newMoves = [...prev.moves]
           let lastMove = prev.lastMove
-          let hasWon = false
+          const hasWon = false
           
           if (playerColor !== null) {
             // Adding a move
@@ -128,8 +259,9 @@ export default function Home() {
             board: newBoard,
             moves: newMoves,
             lastMove: lastMove,
-            currentPlayer: playerColor === null ? prev.currentPlayer : 
-                          (playerColor === "black" ? "white" : "black"),
+            currentPlayer: playerColor === null
+              ? (newMoves.length % 2 === 0 ? "black" : "white")
+              : (playerColor === "black" ? "white" : "black"),
             winner: hasWon ? playerColor : null,
             status: hasWon ? "finished" : "playing",
           }
@@ -143,11 +275,18 @@ export default function Home() {
         // Convert backend player format to frontend format
         const currentPlayer: "black" | "white" = payload.currentPlayer === "Black" ? "black" : "white"
         
-        setGameState((prev) => ({
-          ...prev,
-          currentPlayer,
-          forbiddenMoves: payload.forbiddenSequences,
-        }))
+        if (modeRef.current === "ai") {
+          setGameState((prev) => ({
+            ...prev,
+            forbiddenMoves: payload.forbiddenSequences,
+          }))
+        } else {
+          setGameState((prev) => ({
+            ...prev,
+            currentPlayer,
+            forbiddenMoves: payload.forbiddenSequences,
+          }))
+        }
         
         // Log forbidden sequences
         if (payload.forbiddenSequences.length > 0) {
@@ -158,15 +297,18 @@ export default function Home() {
         console.log("Game won:", payload)
         const winner: Stone = payload.player_id === "Black" ? "black" : "white"
         const winnerName = winner === "black" ? "Black" : "White"
-        const winMessage = payload.is_by_five 
-          ? `${winnerName} player wins by 5 in a row!`
-          : `${winnerName} player wins by captures!`
+        const winMessage = payload.is_by_five === false
+          ? `${winnerName} player wins by captures!`
+          : `${winnerName} player wins by 5 in a row!`
         
         setGameState((prev) => ({
           ...prev,
           winner,
           status: "finished",
         }))
+
+        setAiThinking(false)
+        setStartingAiGame(false)
         
         toast(winMessage, "default")
       },
@@ -178,6 +320,9 @@ export default function Home() {
           ...prev,
           status: "finished",
         }))
+
+        setAiThinking(false)
+        setStartingAiGame(false)
       },
       onPlayerLeave: () => {
         console.log("Player left the game")
@@ -187,13 +332,24 @@ export default function Home() {
           ...prev,
           status: "finished",
         }))
+
+        setAiThinking(false)
+        setStartingAiGame(false)
       },
       onEventError: (error: string) => {
         console.error("Event error:", error)
+        setAiThinking(false)
+        setStartingAiGame(false)
+        setAiError(error)
+        addAiLog(`AI error: ${error}`)
         toast(`Error: ${error}`, "destructive")
       },
       onRoomError: (error: string) => {
         console.error("Room error:", error)
+        setAiThinking(false)
+        setStartingAiGame(false)
+        setAiError(error)
+        addAiLog(`Room error: ${error}`)
         toast(`Room error: ${error}`, "destructive")
       },
       onConnect: () => {
@@ -202,14 +358,42 @@ export default function Home() {
       },
       onDisconnect: () => {
         console.log("Disconnected from server")
+        setAiThinking(false)
+        setStartingAiGame(false)
+        addAiLog("AI server disconnected")
         toast("Disconnected from server", "destructive")
       },
     })
+  }, [addAiLog, toast])
+
+
+
+  const ensureAiConnection = React.useCallback(async () => {
+    if (gameClient.isConnected()) {
+      return true
+    }
+
+    try {
+      await gameClient.connect()
+      return true
+    } catch (error) {
+      console.error("Failed to connect to AI server:", error)
+      toast("AI server is not connected", "destructive")
+      return false
+    }
   }, [toast])
 
+  const resetGame = React.useCallback(async (nextMode = mode) => {
+    if (nextMode === "ai" && !(await ensureAiConnection())) {
+      return
+    }
 
+    setAiError(null)
+    setAiThinking(false)
+    if (nextMode === "ai") {
+      resetAiMetrics()
+    }
 
-  const resetGame = React.useCallback(async () => {
     setGameState({
       board: createBoard(settings.boardSize),
       currentPlayer: "black",
@@ -218,21 +402,59 @@ export default function Home() {
       status: "playing",
       winner: null,
       boardSize: settings.boardSize,
-      mode,
-      players: defaultPlayers,
+      mode: nextMode,
+      players: getPlayers(nextMode),
       forbiddenMoves: [],
     })
 
-    // For online/AI modes, notify the server to start a new game
-    if ((mode === "online" || mode === "ai") && gameClient.isConnected()) {
+    if (nextMode === "ai") {
       try {
-        await gameClient.startGame(settings.boardSize, mode)
+        setStartingAiGame(true)
+        await gameClient.startGame(settings.boardSize, nextMode)
       } catch (error) {
         console.error("Failed to start game:", error)
+        setStartingAiGame(false)
+        setAiError("Failed to start AI game")
         toast(`Failed to start game: ${error}`, "destructive")
       }
     }
-  }, [settings.boardSize, mode, toast])
+  }, [ensureAiConnection, resetAiMetrics, settings.boardSize, mode, toast])
+
+  const startAiGame = React.useCallback(async () => {
+    setStartingAiGame(true)
+    setAiError(null)
+
+    if (!(await ensureAiConnection())) {
+      setStartingAiGame(false)
+      return
+    }
+
+    setMode("ai")
+    setAiThinking(false)
+    resetAiMetrics()
+    addAiLog("Starting AI game")
+    setGameState({
+      board: createBoard(settings.boardSize),
+      currentPlayer: HUMAN_PLAYER,
+      moves: [],
+      lastMove: null,
+      status: "waiting",
+      winner: null,
+      boardSize: settings.boardSize,
+      mode: "ai",
+      players: getPlayers("ai"),
+      forbiddenMoves: [],
+    })
+
+    try {
+      await gameClient.startGame(settings.boardSize, "ai")
+    } catch (error) {
+      console.error("Failed to start AI game:", error)
+      setStartingAiGame(false)
+      setAiError("Failed to start AI game")
+      toast(`Failed to start AI game: ${error}`, "destructive")
+    }
+  }, [addAiLog, ensureAiConnection, resetAiMetrics, settings.boardSize, toast])
 
   React.useEffect(() => {
     if (settings.boardSize !== gameState.boardSize) {
@@ -246,20 +468,42 @@ export default function Home() {
         return
       }
 
+      if (mode === "ai" && gameState.currentPlayer !== HUMAN_PLAYER) {
+        toast("Wait for the AI move", "destructive")
+        return
+      }
+
+      if (mode === "ai" && (aiThinking || startingAiGame)) {
+        return
+      }
+
       if (gameState.board[row][col] !== null) {
         toast("Invalid move: Cell is already occupied", "destructive")
         return
       }
 
-      // For online/AI modes, send move to server
-      if ((mode === "online" || mode === "ai") && gameClient.isConnected()) {
+      if (isForbiddenMove(row, col, gameState.forbiddenMoves)) {
+        toast("Invalid move: forbidden position", "destructive")
+        return
+      }
+
+      if (mode === "ai" && gameClient.isConnected()) {
         try {
+          setAiError(null)
+          setAiThinking(true)
           await gameClient.makeMove(col, row) // Backend uses x=col, y=row
           // Server will respond with board-cell event to update the board
         } catch (error) {
           console.error("Failed to make move:", error)
+          setAiThinking(false)
+          setAiError("Failed to make move")
           toast(`Failed to make move: ${error}`, "destructive")
         }
+        return
+      }
+
+      if (mode === "ai") {
+        toast("AI server is not connected", "destructive")
         return
       }
 
@@ -290,7 +534,7 @@ export default function Home() {
         status: hasWon ? "finished" : "playing",
       }))
     },
-    [gameState, toast, mode]
+    [aiThinking, gameState, mode, startingAiGame, toast]
   )
 
   const handleUndo = React.useCallback(async () => {
@@ -298,15 +542,31 @@ export default function Home() {
       return
     }
 
-    // For online/AI modes, request undo from server
-    if ((mode === "online" || mode === "ai") && gameClient.isConnected()) {
+    if (mode === "ai" && (aiThinking || gameState.currentPlayer !== HUMAN_PLAYER)) {
+      toast("Wait for the AI move before undoing", "destructive")
+      return
+    }
+
+    if (mode === "ai" && gameState.moves.length < 2) {
+      toast("Play a full turn before undoing", "destructive")
+      return
+    }
+
+    if (mode === "ai" && gameClient.isConnected()) {
       try {
+        setAiError(null)
         await gameClient.requestUndo()
-        // Server will respond with undo event to update the board
+        await gameClient.requestUndo()
       } catch (error) {
         console.error("Failed to undo:", error)
+        setAiError("Failed to undo")
         toast(`Failed to undo: ${error}`, "destructive")
       }
+      return
+    }
+
+    if (mode === "ai") {
+      toast("AI server is not connected", "destructive")
       return
     }
 
@@ -326,20 +586,22 @@ export default function Home() {
       status: "playing",
       winner: null,
     }))
-  }, [gameState, mode, toast])
+  }, [aiThinking, gameState, mode, toast])
 
   const handleRestart = React.useCallback(() => {
     resetGame()
   }, [resetGame])
 
   const handleResign = React.useCallback(async () => {
-    // For online/AI modes, notify server that we're leaving
-    if ((mode === "online" || mode === "ai") && gameClient.isConnected()) {
+    if (mode === "ai" && gameClient.isConnected()) {
       try {
         await gameClient.leaveGame()
       } catch (error) {
         console.error("Failed to leave game:", error)
       }
+    } else if (mode === "ai") {
+      toast("AI server is not connected", "destructive")
+      return
     }
     
     setGameState((prev) => ({
@@ -347,12 +609,16 @@ export default function Home() {
       status: "finished",
       winner: prev.currentPlayer === "black" ? "white" : "black",
     }))
-  }, [mode])
+  }, [mode, toast])
 
   const handleModeChange = React.useCallback(async (newMode: GameMode) => {
+    if (newMode === "ai" && !(await ensureAiConnection())) {
+      return
+    }
+
     setMode(newMode)
-    await resetGame()
-  }, [resetGame])
+    await resetGame(newMode)
+  }, [ensureAiConnection, resetGame])
 
   const handleSettingsChange = React.useCallback(
     (newSettings: Partial<GameSettings>) => {
@@ -363,6 +629,27 @@ export default function Home() {
 
   const showEndgameDialog =
     gameState.status === "finished" && gameState.winner !== null
+  const isAiMode = mode === "ai"
+  const isHumanTurn = gameState.currentPlayer === HUMAN_PLAYER
+  const boardDisabled =
+    gameState.status !== "playing" ||
+    (isAiMode &&
+      (startingAiGame ||
+        aiThinking ||
+        !isHumanTurn ||
+        connectionStatus !== "connected"))
+  const aiStatus = !isAiMode
+    ? null
+    : aiError ??
+      (connectionStatus !== "connected"
+        ? "AI server offline"
+        : startingAiGame
+          ? "Starting AI game"
+          : aiThinking
+            ? "AI thinking..."
+            : isHumanTurn
+              ? "Your turn"
+              : "Waiting for AI")
 
   console.log("Current game status:", gameState.status)
 
@@ -374,77 +661,99 @@ export default function Home() {
           connectionStatus={connectionStatus}
           onSettingsClick={() => setSettingsOpen(true)}
         />
-        <main className="flex-1 flex items-center justify-center p-4">
-          <Card className="w-full max-w-md">
-            <CardContent className="pt-6">
-              <div className="flex flex-col gap-4 text-center">
-                <h2 className="text-2xl font-bold">Start a Match</h2>
-                <p className="text-muted-foreground">
-                  Choose a game mode to begin
-                </p>
-                <div className="flex flex-col gap-2 pt-4">
-                  <Button
-                    onClick={() => {
-                      setMode("local")
-                      setGameState((prev) => ({ ...prev, status: "playing" }))
-                    }}
-                  >
-                    Local PvP
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      console.log("AI button clicked")
-                      setMode("ai")
-                      setGameState((prev) => ({ ...prev, mode: "ai" }))
-                      
-                      // Send game-start to server
-                      console.log("Is connected?", gameClient.isConnected())
-                      if (gameClient.isConnected()) {
-                        try {
-                          console.log("Starting AI game with board size:", settings.boardSize)
-                          gameClient.startGame(settings.boardSize, "ai")
-                        } catch (error) {
-                          console.error("Failed to start AI game:", error)
-                          toast(`Failed to start AI game: ${error}`, "destructive")
-                        }
-                      } else {
-                        console.log("Not connected - cannot start game")
-                        toast("Not connected to server", "destructive")
-                      }
-                    }}
-                  >
-                    vs AI
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      console.log("Online button clicked")
-                      setMode("online")
-                      setGameState((prev) => ({ ...prev, mode: "online" }))
-                      
-                      // Send game-start to server
-                      console.log("Is connected?", gameClient.isConnected())
-                      if (gameClient.isConnected()) {
-                        try {
-                          console.log("Starting online game with board size:", settings.boardSize)
-                          gameClient.startGame(settings.boardSize, "online")
-                        } catch (error) {
-                          console.error("Failed to start online game:", error)
-                          toast(`Failed to start online game: ${error}`, "destructive")
-                        }
-                      } else {
-                        console.log("Not connected - cannot start game")
-                        toast("Not connected to server", "destructive")
-                      }
-                    }}
-                  >
-                    Online
-                  </Button>
-                </div>
+        <main className="flex-1 container mx-auto w-full px-4 py-8">
+          <div className="mx-auto grid w-full max-w-5xl items-center gap-6 lg:grid-cols-2">
+            <div className="flex flex-col gap-3">
+              <div className="inline-flex w-fit items-center gap-2 rounded-full border bg-card/60 px-3 py-1 text-xs text-muted-foreground">
+                <span className="h-2 w-2 rounded-full bg-emerald-500/70" />
+                Modern Gomoku
               </div>
-            </CardContent>
-          </Card>
+              <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+                Start a match
+              </h2>
+              <p className="text-sm text-muted-foreground sm:text-base">
+                Pick a mode, place stones, and play for five-in-a-row. AI mode
+                requires a live server connection.
+              </p>
+
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button
+                  onClick={() => {
+                    setMode("local")
+                    setGameState((prev) => ({
+                      ...prev,
+                      status: "playing",
+                      mode: "local",
+                      players: getPlayers("local"),
+                    }))
+                  }}
+                >
+                  1v1 Local
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={startAiGame}
+                  disabled={startingAiGame || connectionStatus !== "connected"}
+                >
+                  {startingAiGame ? "Starting AI..." : "vs AI"}
+                </Button>
+              </div>
+
+              <div className="mt-3 grid gap-2">
+                <div className="rounded-lg border bg-card/60 px-4 py-3">
+                  <div className="text-sm font-medium">AI connection</div>
+                  <div className="text-sm text-muted-foreground">
+                    {connectionStatus === "connected"
+                      ? "Ready"
+                      : connectionStatus === "connecting"
+                        ? "Connecting..."
+                        : "Offline"}
+                  </div>
+                </div>
+                {connectionStatus !== "connected" && (
+                  <div className="rounded-lg border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+                    If AI mode is unavailable, start a local match or run the
+                    server, then reload.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <Card className="overflow-hidden">
+              <CardHeader className="pb-4">
+                <CardTitle>Quick rules</CardTitle>
+                <CardDescription>
+                  Five in a row wins. In AI mode, forbidden positions are marked.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-3">
+                <div className="grid gap-2 text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">Board</span>
+                    <span className="font-medium">{settings.boardSize}×{settings.boardSize}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">Turn order</span>
+                    <span className="font-medium">Black starts</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">Undo</span>
+                    <span className="font-medium">Available during play</span>
+                  </div>
+                </div>
+                <div className="rounded-xl border bg-linear-to-br from-[#f1d7a6] via-[#e8c78e] to-[#dbb46e] dark:from-[#2a241a] dark:via-[#241f18] dark:to-[#1a1712] p-5">
+                  <div className="grid grid-cols-9 gap-1">
+                    {Array.from({ length: 81 }).map((_, i) => (
+                      <div
+                        key={i}
+                        className="aspect-square rounded-[4px] border border-black/10 dark:border-white/10 bg-white/10"
+                      />
+                    ))}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         </main>
         <SettingsDialog
           open={settingsOpen}
@@ -463,27 +772,32 @@ export default function Home() {
         connectionStatus={connectionStatus}
         onSettingsClick={() => setSettingsOpen(true)}
       />
-      <main className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-4 p-4 container mx-auto">
-        <div className="flex items-center justify-center min-h-0">
-          <Board
-            board={gameState.board}
-            lastMove={gameState.lastMove}
-            currentPlayer={gameState.currentPlayer}
-            showCoordinates={settings.showCoordinates}
-            onCellClick={handleCellClick}
-            disabled={gameState.status !== "playing"}
-            forbiddenMoves={gameState.forbiddenMoves}
-          />
-        </div>
-        <div className="lg:flex lg:flex-col lg:items-end">
-          <RightPanel
-            gameState={gameState}
-            mode={mode}
-            onModeChange={handleModeChange}
-            onUndo={handleUndo}
-            onRestart={handleRestart}
-            onResign={handleResign}
-          />
+      <main className="flex-1 container mx-auto w-full px-4 py-4">
+        <div className="grid min-h-[calc(100vh-3.5rem)] grid-cols-1 gap-4 lg:grid-cols-[380px_minmax(0,1fr)] lg:items-stretch">
+          <div className="min-h-0">
+            <RightPanel
+              gameState={gameState}
+              mode={mode}
+              onModeChange={handleModeChange}
+              onUndo={handleUndo}
+              onRestart={handleRestart}
+              onResign={handleResign}
+              aiStatus={aiStatus}
+              aiMetrics={isAiMode ? aiMetrics : null}
+              actionsDisabled={startingAiGame || aiThinking}
+            />
+          </div>
+          <div className="flex min-h-[60vh] items-center justify-center lg:min-h-0 lg:justify-end">
+            <Board
+              board={gameState.board}
+              lastMove={gameState.lastMove}
+              currentPlayer={gameState.currentPlayer}
+              showCoordinates={settings.showCoordinates}
+              onCellClick={handleCellClick}
+              disabled={boardDisabled}
+              forbiddenMoves={gameState.forbiddenMoves}
+            />
+          </div>
         </div>
       </main>
       <SettingsDialog

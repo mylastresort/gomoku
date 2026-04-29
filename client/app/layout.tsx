@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Gomoku",
-  description: "Play Gomoku online",
+  description: "Play Gomoku",
 };
 
 export default function RootLayout({

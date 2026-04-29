@@ -1,7 +1,7 @@
 import { io, Socket } from "socket.io-client"
-import type { GameMode, GameState, Player } from "../gomoku/types"
+import type { GameMode } from "../gomoku/types"
 
-export type ConnectionStatus = "connecting" | "online" | "offline"
+export type ConnectionStatus = "connecting" | "connected" | "offline"
 
 // Event payloads from backend
 export interface GameStartPayload {
@@ -26,8 +26,8 @@ export interface GameStartedPayload {
 
 export interface GameWinPayload {
   player_id: "White" | "Black"
-  seq: number[] | null
-  is_by_five: boolean
+  seq: Array<[number, number]> | null
+  is_by_five?: boolean
 }
 
 export interface GameEndedPayload {
@@ -77,7 +77,7 @@ class GameClient {
   /**
    * Connect to the game server via WebSocket
    */
-  connect(mode: GameMode): Promise<void> {
+  connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       // Only connect in browser environment
       if (typeof window === "undefined") {
@@ -106,7 +106,7 @@ class GameClient {
       // Connection event handlers
       this.socket.on("connect", () => {
         console.log("✓ Connected to game server")
-        this.status = "online"
+        this.status = "connected"
         this.notifyStatusListeners()
         this.eventHandlers.onConnect?.()
         
@@ -239,8 +239,8 @@ class GameClient {
       throw new Error("Not connected to server")
     }
 
-    const backendMode: GameStartPayload["mode"] = 
-      mode === "ai" ? "PvE" : mode === "online" ? "PvP" : "PvP"
+    const backendMode: GameStartPayload["mode"] =
+      mode === "ai" ? "PvE" : "PvP"
 
     const payload = {
       board_size: boardSize,
@@ -282,15 +282,7 @@ class GameClient {
       throw new Error("Not connected to server")
     }
 
-    return new Promise((resolve, reject) => {
-      this.socket!.emit("undo", {}, (response: any) => {
-        if (response?.error) {
-          reject(new Error(response.error))
-        } else {
-          resolve()
-        }
-      })
-    })
+    this.socket.emit("undo", {})
   }
 
   /**
@@ -301,15 +293,7 @@ class GameClient {
       throw new Error("Not connected to server")
     }
 
-    return new Promise((resolve, reject) => {
-      this.socket!.emit("player-leave", {}, (response: any) => {
-        if (response?.error) {
-          reject(new Error(response.error))
-        } else {
-          resolve()
-        }
-      })
-    })
+    this.socket.emit("player-leave", {})
   }
 
   /**

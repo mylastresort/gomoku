@@ -29,6 +29,7 @@ impl RoomEvent for GameWinEvent {
                     &json!({
                         "player_id": payload.player_id,
                         "seq": payload.win_seq,
+                        "is_by_five": payload.is_by_five,
                     }),
                 )
                 .await;
