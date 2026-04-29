@@ -1,3 +1,5 @@
+#[allow(dead_code)]
+mod bridge;
 pub mod events;
 pub mod game;
 pub mod shared;
