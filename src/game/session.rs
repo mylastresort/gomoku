@@ -28,6 +28,8 @@ pub struct GameSession {
     pub room: Room,
     // Game mode (e.g., PvP, PvE, EvE)
     pub mode: GameMode,
+    // Whether the background EvE loop is currently running.
+    pub eve_loop_running: bool,
 }
 
 impl Default for GameSession {
@@ -42,6 +44,7 @@ impl GameSession {
             state: GameState::new(_board_size),
             room: Room::default(),
             mode: GameMode::PvP, // Default mode
+            eve_loop_running: false,
         }
     }
 
@@ -156,12 +159,16 @@ impl GameSession {
         Ok(true)
     }
 
-    async fn play_ai_move(&mut self, _s: &SocketRef) -> Result<(), Error> {
+    async fn play_ai_move(
+        &mut self,
+        _s: &SocketRef,
+        ai_player: Player,
+    ) -> Result<(), Error> {
         if self.state.status != GameStatus::Ongoing {
             return Ok(());
         }
 
-        if self.state.get_current_player() != Player::White {
+        if self.state.get_current_player() != ai_player {
             return Ok(());
         }
 
@@ -169,7 +176,7 @@ impl GameSession {
         let ai_move = invoke_python_ai_from_game_state(
             &PythonBridgeConfig::default(),
             &self.state,
-            Player::White,
+            ai_player,
         )
         .map_err(|err| {
             Error::new(
@@ -190,6 +197,42 @@ impl GameSession {
         Ok(())
     }
 
+    pub fn begin_eve_loop(&mut self) -> bool {
+        if self.mode != GameMode::EvE
+            || self.state.status != GameStatus::Ongoing
+            || !self.room.has_room()
+            || self.eve_loop_running
+        {
+            return false;
+        }
+
+        self.eve_loop_running = true;
+        true
+    }
+
+    pub fn should_continue_eve(&self) -> bool {
+        self.eve_loop_running
+            && self.mode == GameMode::EvE
+            && self.state.status == GameStatus::Ongoing
+            && self.room.has_room()
+    }
+
+    pub fn stop_eve_loop(&mut self) {
+        self.eve_loop_running = false;
+    }
+
+    pub async fn play_eve_move_once(
+        &mut self,
+        _s: &SocketRef,
+    ) -> Result<(), Error> {
+        if !self.should_continue_eve() {
+            return Ok(());
+        }
+
+        let current_player = self.state.get_current_player();
+        self.play_ai_move(_s, current_player).await
+    }
+
     // Action: Start a new game session
     // creates a room once and notifies players that the game when started
     pub async fn start_game(
@@ -200,6 +243,7 @@ impl GameSession {
     ) {
         self.state = GameState::new(board_size);
         self.mode = _mode;
+        self.eve_loop_running = false;
         // Create a room and join players to push game events
         self.room.join_room(_s);
         // send notification to all players in the room that the game has started
@@ -233,9 +277,16 @@ impl GameSession {
             ));
         }
 
+        if self.mode == GameMode::EvE {
+            return Err(Error::new(
+                std::io::ErrorKind::Other,
+                "Cannot make manual moves in EvE mode",
+            ));
+        }
+
         if self.mode == GameMode::PvE {
             if self.apply_and_emit_move(_s, x, y, false).await? {
-                self.play_ai_move(_s).await?;
+                self.play_ai_move(_s, Player::White).await?;
             }
             return Ok(());
         }
@@ -248,6 +299,8 @@ impl GameSession {
     // Action: End the current game session
     pub async fn end_game(&mut self, _s: &SocketRef) {
         // Logic to end the game
+        self.stop_eve_loop();
+        self.state.status = GameStatus::Finished;
         self.room.notify_room::<GameEndedEvent>(_s, None).await;
         // Cleanup the room
         self.room.leave_room(_s);

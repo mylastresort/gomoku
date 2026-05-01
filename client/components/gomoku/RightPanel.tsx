@@ -50,6 +50,7 @@ export function RightPanel({
   hintDisabled = false,
 }: RightPanelProps) {
   const canUndo = gameState.moves.length > 0
+  const isEveMode = mode === "eve"
 
   return (
     <div className="flex min-h-0 w-full flex-col gap-4 lg:sticky lg:top-20">
@@ -59,12 +60,15 @@ export function RightPanel({
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <Tabs value={mode} onValueChange={(v) => onModeChange(v as GameMode)}>
-            <TabsList className="grid w-full grid-cols-2">
+            <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="local" disabled={actionsDisabled}>
                 1v1 Local
               </TabsTrigger>
               <TabsTrigger value="ai" disabled={actionsDisabled}>
                 vs AI
+              </TabsTrigger>
+              <TabsTrigger value="eve" disabled={actionsDisabled}>
+                EvE
               </TabsTrigger>
             </TabsList>
           </Tabs>
@@ -122,7 +126,7 @@ export function RightPanel({
               variant="outline"
               size="sm"
               onClick={onUndo}
-              disabled={!canUndo || actionsDisabled}
+              disabled={isEveMode || !canUndo || actionsDisabled}
             >
               <RotateCcw className="h-4 w-4 mr-2" />
               Undo
@@ -142,7 +146,7 @@ export function RightPanel({
                 size="sm"
                 onClick={onRestart}
                 className="flex-1"
-                disabled={actionsDisabled}
+                disabled={isEveMode || actionsDisabled}
               >
                 <RefreshCw className="h-4 w-4 mr-2" />
                 Restart

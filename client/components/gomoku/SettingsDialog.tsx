@@ -70,7 +70,7 @@ export function SettingsDialog({
             />
           </div>
 
-          {mode === "ai" && (
+          {(mode === "ai" || mode === "eve") && (
             <>
               <Separator />
               <div className="flex flex-col gap-2">
