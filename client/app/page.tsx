@@ -331,18 +331,11 @@ export default function Home() {
         // Convert backend player format to frontend format
         const currentPlayer: "black" | "white" = payload.currentPlayer === "Black" ? "black" : "white"
         
-        if (modeRef.current === "ai") {
-          setGameState((prev) => ({
-            ...prev,
-            forbiddenMoves: payload.forbiddenSequences,
-          }))
-        } else {
-          setGameState((prev) => ({
-            ...prev,
-            currentPlayer,
-            forbiddenMoves: payload.forbiddenSequences,
-          }))
-        }
+        setGameState((prev) => ({
+          ...prev,
+          currentPlayer,
+          forbiddenMoves: payload.forbiddenSequences,
+        }))
         
         // Log forbidden sequences
         if (payload.forbiddenSequences.length > 0) {
@@ -459,16 +452,14 @@ export default function Home() {
   }, [toast])
 
   const resetGame = React.useCallback(async (nextMode = mode) => {
-    if (nextMode !== "local" && !(await ensureAiConnection())) {
+    if (!(await ensureAiConnection())) {
       return
     }
 
     setAiError(null)
     setAiThinking(false)
     setHintCell(null)
-    if (nextMode !== "local") {
-      resetAiMetrics()
-    }
+    resetAiMetrics()
 
     setGameState({
       board: createBoard(settings.boardSize),
@@ -483,16 +474,14 @@ export default function Home() {
       forbiddenMoves: [],
     })
 
-    if (nextMode !== "local") {
-      try {
-        setStartingAiGame(true)
-        await gameClient.startGame(settings.boardSize, nextMode)
-      } catch (error) {
-        console.error("Failed to start game:", error)
-        setStartingAiGame(false)
-        setAiError("Failed to start AI game")
-        toast(`Failed to start game: ${error}`, "destructive")
-      }
+    try {
+      setStartingAiGame(true)
+      await gameClient.startGame(settings.boardSize, nextMode)
+    } catch (error) {
+      console.error("Failed to start game:", error)
+      setStartingAiGame(false)
+      setAiError("Failed to start game")
+      toast(`Failed to start game: ${error}`, "destructive")
     }
   }, [ensureAiConnection, resetAiMetrics, settings.boardSize, mode, toast])
 
@@ -606,54 +595,32 @@ export default function Home() {
         return
       }
 
-      if (mode === "ai" && gameClient.isConnected()) {
+      // For both ai and local modes, send to server if connected
+      if (gameClient.isConnected()) {
         try {
           setAiError(null)
-          setAiThinking(true)
+          if (mode === "ai") {
+            setAiThinking(true)
+          }
           setHintCell(null)
           await gameClient.makeMove(col, row) // Backend uses x=col, y=row
           // Server will respond with board-cell event to update the board
         } catch (error) {
           console.error("Failed to make move:", error)
-          setAiThinking(false)
+          if (mode === "ai") {
+            setAiThinking(false)
+          }
           setAiError("Failed to make move")
           toast(`Failed to make move: ${error}`, "destructive")
         }
         return
       }
 
-      if (mode === "ai") {
-        toast("AI server is not connected", "destructive")
+      // Fallback if server not connected for these modes
+      if (mode === "ai" || mode === "local") {
+        toast("Server is not connected", "destructive")
         return
       }
-
-      // For local mode, handle move locally
-      const result = placeMove(
-        gameState.board,
-        row,
-        col,
-        gameState.currentPlayer
-      )
-
-      if (!result.success) {
-        toast("Invalid move", "destructive")
-        return
-      }
-
-      const move = createMove(row, col, gameState.currentPlayer)
-      const newMoves = [...gameState.moves, move]
-      const hasWon = checkWin(result.board, row, col, gameState.currentPlayer)
-      setHintCell(null)
-
-      setGameState((prev) => ({
-        ...prev,
-        board: result.board,
-        currentPlayer: prev.currentPlayer === "black" ? "white" : "black",
-        moves: newMoves,
-        lastMove: move,
-        winner: hasWon ? prev.currentPlayer : null,
-        status: hasWon ? "finished" : "playing",
-      }))
     },
     [aiThinking, gameState, mode, startingAiGame, toast]
   )
@@ -678,11 +645,21 @@ export default function Home() {
       return
     }
 
-    if (mode === "ai" && gameClient.isConnected()) {
+    if (mode === "local" && gameState.moves.length < 2) {
+      toast("Play a full turn before undoing", "destructive")
+      return
+    }
+
+    if ((mode === "ai" || mode === "local") && gameClient.isConnected()) {
       try {
         setAiError(null)
-        await gameClient.requestUndo()
-        await gameClient.requestUndo()
+        if (mode === "ai") {
+          await gameClient.requestUndo()
+          await gameClient.requestUndo()
+        } else {
+          // For local PvP, undo once per click (one move at a time)
+          await gameClient.requestUndo()
+        }
       } catch (error) {
         console.error("Failed to undo:", error)
         setAiError("Failed to undo")
@@ -691,28 +668,11 @@ export default function Home() {
       return
     }
 
-    if (mode === "ai") {
-      toast("AI server is not connected", "destructive")
+    if (mode === "ai" || mode === "local") {
+      toast("Server is not connected", "destructive")
       return
     }
-
-    // For local mode, handle undo locally
-    const { board: newBoard, newMoves } = undoMove(
-      gameState.board,
-      gameState.moves
-    )
-
-    setGameState((prev) => ({
-      ...prev,
-      board: newBoard,
-      moves: newMoves,
-      lastMove: newMoves.length > 0 ? newMoves[newMoves.length - 1] : null,
-      currentPlayer:
-        newMoves.length % 2 === 0 ? "black" : "white",
-      status: "playing",
-      winner: null,
-    }))
-  }, [aiThinking, gameState, mode, toast])
+  }, [aiThinking, gameState.currentPlayer, gameState.moves.length, mode, toast])
 
   const handleRestart = React.useCallback(() => {
     resetGame()
@@ -723,13 +683,13 @@ export default function Home() {
       return
     }
 
-    if (mode === "eve") {
-      toast("Hints are disabled in EvE mode", "destructive")
+    if (mode === "eve" || mode === "local") {
+      toast("Hints are not available in this mode", "destructive")
       return
     }
 
     if (!gameClient.isConnected()) {
-      toast("AI server is not connected", "destructive")
+      toast("Server is not connected", "destructive")
       return
     }
 
@@ -752,14 +712,14 @@ export default function Home() {
   }, [aiThinking, gameState.currentPlayer, gameState.status, mode, startingAiGame, toast])
 
   const handleResign = React.useCallback(async () => {
-    if ((mode === "ai" || mode === "eve") && gameClient.isConnected()) {
+    if ((mode === "ai" || mode === "eve" || mode === "local") && gameClient.isConnected()) {
       try {
         await gameClient.leaveGame()
       } catch (error) {
         console.error("Failed to leave game:", error)
       }
     } else if (mode === "ai" || mode === "eve") {
-      toast("AI server is not connected", "destructive")
+      toast("Server is not connected", "destructive")
       return
     }
 
@@ -786,7 +746,7 @@ export default function Home() {
       return
     }
 
-    if (newMode !== "local" && !(await ensureAiConnection())) {
+    if (!(await ensureAiConnection())) {
       return
     }
 
@@ -883,12 +843,7 @@ export default function Home() {
                 <Button
                   onClick={() => {
                     setMode("local")
-                    setGameState((prev) => ({
-                      ...prev,
-                      status: "playing",
-                      mode: "local",
-                      players: getPlayers("local"),
-                    }))
+                    resetGame("local")
                   }}
                 >
                   1v1 Local
