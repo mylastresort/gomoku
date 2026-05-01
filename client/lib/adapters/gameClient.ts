@@ -48,6 +48,12 @@ export interface RoomErrorPayload {
   message: string
 }
 
+export interface MoveHintPayload {
+  x: number
+  y: number
+  player_id: "White" | "Black"
+}
+
 // Event handlers type
 export interface GameEventHandlers {
   onGameStarted?: (payload: GameStartedPayload) => void
@@ -55,6 +61,7 @@ export interface GameEventHandlers {
   onGameTurn?: (payload: GameTurnPayload) => void
   onGameWin?: (payload: GameWinPayload) => void
   onGameEnded?: (payload: GameEndedPayload) => void
+  onMoveHint?: (payload: MoveHintPayload) => void
   onPlayerLeave?: () => void
   onEventError?: (error: string) => void
   onRoomError?: (error: string) => void
@@ -172,6 +179,12 @@ class GameClient {
       this.eventHandlers.onGameEnded?.({ message: payload })
     })
 
+    // move-hint event - AI suggested move for current turn
+    this.socket.on("move-hint", (payload: MoveHintPayload) => {
+      console.log("Move hint:", payload)
+      this.eventHandlers.onMoveHint?.(payload)
+    })
+
     // player-leave event - when a player leaves
     this.socket.on("player-leave", () => {
       console.log("Player left")
@@ -283,6 +296,17 @@ class GameClient {
     }
 
     this.socket.emit("undo", {})
+  }
+
+  /**
+   * Request a move hint for the current player's turn
+   */
+  async requestMoveHint(): Promise<void> {
+    if (!this.socket?.connected) {
+      throw new Error("Not connected to server")
+    }
+
+    this.socket.emit("move-hint-request", {})
   }
 
   /**

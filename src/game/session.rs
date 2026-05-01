@@ -1,5 +1,6 @@
 use std::io::Error;
 
+use serde_json::json;
 use socketioxide::extract::SocketRef;
 use tracing::info;
 
@@ -285,6 +286,60 @@ impl GameSession {
 
         // Print the board after undo
         self.print_board();
+
+        Ok(())
+    }
+
+    pub async fn request_move_hint(
+        &mut self,
+        _s: &SocketRef,
+    ) -> Result<(), Error> {
+        // check if game session has an active room
+        if let Err(err) = self.get_active_room() {
+            return Err(err);
+        }
+
+        if self.state.status != GameStatus::Ongoing {
+            return Err(Error::new(
+                std::io::ErrorKind::Other,
+                "Cannot request hint: game is not ongoing",
+            ));
+        }
+
+        let current_player = self.state.get_current_player();
+        info!(
+            "Requesting Python AI hint for current player {:?}",
+            current_player
+        );
+
+        let ai_move = invoke_python_ai_from_game_state(
+            &PythonBridgeConfig::default(),
+            &self.state,
+            current_player,
+        )
+        .map_err(|err| {
+            Error::new(
+                std::io::ErrorKind::Other,
+                format!("Python AI hint failed: {err}"),
+            )
+        })?;
+
+        let Some((x, y)) = ai_move else {
+            return Err(Error::new(
+                std::io::ErrorKind::Other,
+                "Python AI did not return a hint",
+            ));
+        };
+
+        info!("Emitting move hint at ({}, {})", x, y);
+        let _ = _s.emit(
+            "move-hint",
+            &json!({
+                "x": x,
+                "y": y,
+                "player_id": current_player,
+            }),
+        );
 
         Ok(())
     }

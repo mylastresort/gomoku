@@ -9,7 +9,7 @@ import { EndgameDialog } from "@/components/gomoku/EndgameDialog"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/toast"
-import { gameClient, type BoardCellPayload, type ConnectionStatus, type GameStartedPayload, type GameTurnPayload } from "@/lib/adapters/gameClient"
+import { gameClient, type BoardCellPayload, type ConnectionStatus, type GameStartedPayload, type GameTurnPayload, type MoveHintPayload } from "@/lib/adapters/gameClient"
 import {
   createBoard,
   placeMove,
@@ -80,6 +80,7 @@ export default function Home() {
   const [aiThinking, setAiThinking] = React.useState(false)
   const [aiError, setAiError] = React.useState<string | null>(null)
   const [startingAiGame, setStartingAiGame] = React.useState(false)
+  const [hintCell, setHintCell] = React.useState<{ row: number; col: number } | null>(null)
   const [aiMetrics, setAiMetrics] = React.useState<AiMetrics>({
     moveCount: 0,
     lastMoveMs: null,
@@ -168,6 +169,7 @@ export default function Home() {
         setStartingAiGame(false)
         setAiError(null)
         setAiThinking(false)
+        setHintCell(null)
         toast("Game started!", "default")
         
         // Now show the game board
@@ -192,6 +194,11 @@ export default function Home() {
         // Convert backend player format to frontend format
         const playerColor: Stone = payload.player_id === "Black" ? "black" : 
                                    payload.player_id === "White" ? "white" : null
+
+        if (playerColor !== null) {
+          // Any played move clears a previously suggested hint.
+          setHintCell(null)
+        }
 
         if (modeRef.current === "ai") {
           if (playerColor === HUMAN_PLAYER) {
@@ -293,6 +300,19 @@ export default function Home() {
           console.log("Forbidden move sequences:", payload.forbiddenSequences)
         }
       },
+      onMoveHint: (payload: MoveHintPayload) => {
+        if (
+          payload.y < 0 ||
+          payload.y >= gameState.boardSize ||
+          payload.x < 0 ||
+          payload.x >= gameState.boardSize
+        ) {
+          console.warn("Ignoring out-of-bounds move hint payload:", payload)
+          return
+        }
+
+        setHintCell({ row: payload.y, col: payload.x })
+      },
       onGameWin: (payload) => {
         console.log("Game won:", payload)
         const winner: Stone = payload.player_id === "Black" ? "black" : "white"
@@ -309,6 +329,7 @@ export default function Home() {
 
         setAiThinking(false)
         setStartingAiGame(false)
+        setHintCell(null)
         
         toast(winMessage, "default")
       },
@@ -323,6 +344,7 @@ export default function Home() {
 
         setAiThinking(false)
         setStartingAiGame(false)
+        setHintCell(null)
       },
       onPlayerLeave: () => {
         console.log("Player left the game")
@@ -335,11 +357,13 @@ export default function Home() {
 
         setAiThinking(false)
         setStartingAiGame(false)
+        setHintCell(null)
       },
       onEventError: (error: string) => {
         console.error("Event error:", error)
         setAiThinking(false)
         setStartingAiGame(false)
+        setHintCell(null)
         setAiError(error)
         addAiLog(`AI error: ${error}`)
         toast(`Error: ${error}`, "destructive")
@@ -348,6 +372,7 @@ export default function Home() {
         console.error("Room error:", error)
         setAiThinking(false)
         setStartingAiGame(false)
+        setHintCell(null)
         setAiError(error)
         addAiLog(`Room error: ${error}`)
         toast(`Room error: ${error}`, "destructive")
@@ -360,11 +385,12 @@ export default function Home() {
         console.log("Disconnected from server")
         setAiThinking(false)
         setStartingAiGame(false)
+        setHintCell(null)
         addAiLog("AI server disconnected")
         toast("Disconnected from server", "destructive")
       },
     })
-  }, [addAiLog, toast])
+  }, [addAiLog, gameState.boardSize, toast])
 
 
 
@@ -390,6 +416,7 @@ export default function Home() {
 
     setAiError(null)
     setAiThinking(false)
+    setHintCell(null)
     if (nextMode === "ai") {
       resetAiMetrics()
     }
@@ -431,6 +458,7 @@ export default function Home() {
 
     setMode("ai")
     setAiThinking(false)
+    setHintCell(null)
     resetAiMetrics()
     addAiLog("Starting AI game")
     setGameState({
@@ -491,6 +519,7 @@ export default function Home() {
         try {
           setAiError(null)
           setAiThinking(true)
+          setHintCell(null)
           await gameClient.makeMove(col, row) // Backend uses x=col, y=row
           // Server will respond with board-cell event to update the board
         } catch (error) {
@@ -523,6 +552,7 @@ export default function Home() {
       const move = createMove(row, col, gameState.currentPlayer)
       const newMoves = [...gameState.moves, move]
       const hasWon = checkWin(result.board, row, col, gameState.currentPlayer)
+      setHintCell(null)
 
       setGameState((prev) => ({
         ...prev,
@@ -591,6 +621,34 @@ export default function Home() {
   const handleRestart = React.useCallback(() => {
     resetGame()
   }, [resetGame])
+
+  const handleHint = React.useCallback(async () => {
+    if (gameState.status !== "playing") {
+      return
+    }
+
+    if (!gameClient.isConnected()) {
+      toast("AI server is not connected", "destructive")
+      return
+    }
+
+    if (
+      mode === "ai" &&
+      (gameState.currentPlayer !== HUMAN_PLAYER || aiThinking || startingAiGame)
+    ) {
+      toast("Hint is available only on your turn", "destructive")
+      return
+    }
+
+    try {
+      setAiError(null)
+      await gameClient.requestMoveHint()
+    } catch (error) {
+      console.error("Failed to request hint:", error)
+      setAiError("Failed to request hint")
+      toast(`Failed to request hint: ${error}`, "destructive")
+    }
+  }, [aiThinking, gameState.currentPlayer, gameState.status, mode, startingAiGame, toast])
 
   const handleResign = React.useCallback(async () => {
     if (mode === "ai" && gameClient.isConnected()) {
@@ -780,17 +838,24 @@ export default function Home() {
               mode={mode}
               onModeChange={handleModeChange}
               onUndo={handleUndo}
+              onHint={handleHint}
               onRestart={handleRestart}
               onResign={handleResign}
               aiStatus={aiStatus}
               aiMetrics={isAiMode ? aiMetrics : null}
               actionsDisabled={startingAiGame || aiThinking}
+              hintDisabled={
+                gameState.status !== "playing" ||
+                connectionStatus !== "connected" ||
+                (isAiMode && (!isHumanTurn || aiThinking || startingAiGame))
+              }
             />
           </div>
           <div className="flex min-h-[60vh] items-center justify-center lg:min-h-0 lg:justify-end">
             <Board
               board={gameState.board}
               lastMove={gameState.lastMove}
+              hintCell={hintCell}
               currentPlayer={gameState.currentPlayer}
               showCoordinates={settings.showCoordinates}
               onCellClick={handleCellClick}

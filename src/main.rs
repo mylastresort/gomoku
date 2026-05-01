@@ -7,6 +7,7 @@ pub mod shared;
 use crate::{
     events::{
         event::Event, game_start::GameStartEvent,
+        move_hint_request::MoveHintRequestEvent,
         player_leave::PlayerLeaveEvent, player_move::PlayerMoveEvent,
         undo::UndoEvent,
     },
@@ -33,6 +34,7 @@ pub async fn handle_connection(s: SocketRef, config: Config) {
     // Register event handlers
     register_event!(GameStartEvent, &s, &_game_session);
     register_event!(PlayerMoveEvent, &s, &_game_session);
+    register_event!(MoveHintRequestEvent, &s, &_game_session);
     register_event!(UndoEvent, &s, &_game_session);
 
     // Handle client disconnection

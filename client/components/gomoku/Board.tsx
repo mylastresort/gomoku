@@ -7,6 +7,7 @@ import type { Stone, Move } from "@/lib/gomoku/types"
 interface BoardProps {
   board: Stone[][]
   lastMove: Move | null
+  hintCell?: { row: number; col: number } | null
   currentPlayer: "black" | "white"
   showCoordinates: boolean
   onCellClick: (row: number, col: number) => void
@@ -19,6 +20,7 @@ type IndexedForbiddenCell = Record<0 | 1, number>
 export function Board({
   board,
   lastMove,
+  hintCell = null,
   currentPlayer,
   showCoordinates,
   onCellClick,
@@ -139,6 +141,9 @@ export function Board({
               col={colIndex}
               isLastMove={
                 lastMove?.row === rowIndex && lastMove?.col === colIndex
+              }
+              isHint={
+                hintCell?.row === rowIndex && hintCell?.col === colIndex
               }
               showCoordinates={showCoordinates}
               onCellClick={onCellClick}

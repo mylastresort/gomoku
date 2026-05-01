@@ -8,7 +8,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Separator } from "@/components/ui/separator"
 import { MoveList } from "./MoveList"
 import type { GameState, GameMode } from "@/lib/gomoku/types"
-import { RotateCcw, RefreshCw, Flag } from "lucide-react"
+import { RotateCcw, RefreshCw, Flag, Lightbulb } from "lucide-react"
 
 type AiMetrics = {
   moveCount: number
@@ -29,9 +29,11 @@ interface RightPanelProps {
   onUndo: () => void
   onRestart: () => void
   onResign: () => void
+  onHint: () => void
   aiStatus?: string | null
   aiMetrics?: AiMetrics | null
   actionsDisabled?: boolean
+  hintDisabled?: boolean
 }
 
 export function RightPanel({
@@ -41,9 +43,11 @@ export function RightPanel({
   onUndo,
   onRestart,
   onResign,
+  onHint,
   aiStatus = null,
   aiMetrics = null,
   actionsDisabled = false,
+  hintDisabled = false,
 }: RightPanelProps) {
   const canUndo = gameState.moves.length > 0
 
@@ -122,6 +126,15 @@ export function RightPanel({
             >
               <RotateCcw className="h-4 w-4 mr-2" />
               Undo
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onHint}
+              disabled={hintDisabled || actionsDisabled}
+            >
+              <Lightbulb className="h-4 w-4 mr-2" />
+              Hint
             </Button>
             <div className="flex gap-2">
               <Button
