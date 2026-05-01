@@ -6,10 +6,17 @@ import { Board } from "@/components/gomoku/Board"
 import { RightPanel } from "@/components/gomoku/RightPanel"
 import { SettingsDialog } from "@/components/gomoku/SettingsDialog"
 import { EndgameDialog } from "@/components/gomoku/EndgameDialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/toast"
-import { gameClient, type BoardCellPayload, type ConnectionStatus, type GameStartedPayload, type GameTurnPayload } from "@/lib/adapters/gameClient"
+import { gameClient, type BoardCellPayload, type ConnectionStatus, type GameStartedPayload, type GameTurnPayload, type MoveHintPayload } from "@/lib/adapters/gameClient"
 import {
   createBoard,
   placeMove,
@@ -41,8 +48,21 @@ const aiPlayers = {
   white: { id: "ai", name: "AI", color: "white" as const },
 }
 
+const evePlayers = {
+  black: { id: "ai-black", name: "AI Black", color: "black" as const },
+  white: { id: "ai-white", name: "AI White", color: "white" as const },
+}
+
 function getPlayers(mode: GameMode) {
-  return mode === "ai" ? aiPlayers : localPlayers
+  if (mode === "ai") {
+    return aiPlayers
+  }
+
+  if (mode === "eve") {
+    return evePlayers
+  }
+
+  return localPlayers
 }
 
 type AiLogEntry = {
@@ -80,6 +100,9 @@ export default function Home() {
   const [aiThinking, setAiThinking] = React.useState(false)
   const [aiError, setAiError] = React.useState<string | null>(null)
   const [startingAiGame, setStartingAiGame] = React.useState(false)
+  const [hintCell, setHintCell] = React.useState<{ row: number; col: number } | null>(null)
+  const [eveExitDialogOpen, setEveExitDialogOpen] = React.useState(false)
+  const [pendingModeSwitch, setPendingModeSwitch] = React.useState<GameMode | null>(null)
   const [aiMetrics, setAiMetrics] = React.useState<AiMetrics>({
     moveCount: 0,
     lastMoveMs: null,
@@ -106,6 +129,33 @@ export default function Home() {
   React.useEffect(() => {
     modeRef.current = mode
   }, [mode])
+
+  React.useEffect(() => {
+    if (mode !== "eve" || gameState.status !== "playing") {
+      return
+    }
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ""
+    }
+
+    const handlePageHide = () => {
+      if (gameClient.isConnected()) {
+        void gameClient.leaveGame().catch((error) => {
+          console.error("Failed to leave game while closing tab:", error)
+        })
+      }
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload)
+    window.addEventListener("pagehide", handlePageHide)
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload)
+      window.removeEventListener("pagehide", handlePageHide)
+    }
+  }, [mode, gameState.status])
 
   const addAiLog = React.useCallback((message: string) => {
     aiLogIdRef.current += 1
@@ -168,6 +218,7 @@ export default function Home() {
         setStartingAiGame(false)
         setAiError(null)
         setAiThinking(false)
+        setHintCell(null)
         toast("Game started!", "default")
         
         // Now show the game board
@@ -192,6 +243,11 @@ export default function Home() {
         // Convert backend player format to frontend format
         const playerColor: Stone = payload.player_id === "Black" ? "black" : 
                                    payload.player_id === "White" ? "white" : null
+
+        if (playerColor !== null) {
+          // Any played move clears a previously suggested hint.
+          setHintCell(null)
+        }
 
         if (modeRef.current === "ai") {
           if (playerColor === HUMAN_PLAYER) {
@@ -293,6 +349,19 @@ export default function Home() {
           console.log("Forbidden move sequences:", payload.forbiddenSequences)
         }
       },
+      onMoveHint: (payload: MoveHintPayload) => {
+        if (
+          payload.y < 0 ||
+          payload.y >= gameState.boardSize ||
+          payload.x < 0 ||
+          payload.x >= gameState.boardSize
+        ) {
+          console.warn("Ignoring out-of-bounds move hint payload:", payload)
+          return
+        }
+
+        setHintCell({ row: payload.y, col: payload.x })
+      },
       onGameWin: (payload) => {
         console.log("Game won:", payload)
         const winner: Stone = payload.player_id === "Black" ? "black" : "white"
@@ -309,6 +378,7 @@ export default function Home() {
 
         setAiThinking(false)
         setStartingAiGame(false)
+        setHintCell(null)
         
         toast(winMessage, "default")
       },
@@ -323,6 +393,7 @@ export default function Home() {
 
         setAiThinking(false)
         setStartingAiGame(false)
+        setHintCell(null)
       },
       onPlayerLeave: () => {
         console.log("Player left the game")
@@ -335,11 +406,13 @@ export default function Home() {
 
         setAiThinking(false)
         setStartingAiGame(false)
+        setHintCell(null)
       },
       onEventError: (error: string) => {
         console.error("Event error:", error)
         setAiThinking(false)
         setStartingAiGame(false)
+        setHintCell(null)
         setAiError(error)
         addAiLog(`AI error: ${error}`)
         toast(`Error: ${error}`, "destructive")
@@ -348,6 +421,7 @@ export default function Home() {
         console.error("Room error:", error)
         setAiThinking(false)
         setStartingAiGame(false)
+        setHintCell(null)
         setAiError(error)
         addAiLog(`Room error: ${error}`)
         toast(`Room error: ${error}`, "destructive")
@@ -360,11 +434,12 @@ export default function Home() {
         console.log("Disconnected from server")
         setAiThinking(false)
         setStartingAiGame(false)
+        setHintCell(null)
         addAiLog("AI server disconnected")
         toast("Disconnected from server", "destructive")
       },
     })
-  }, [addAiLog, toast])
+  }, [addAiLog, gameState.boardSize, toast])
 
 
 
@@ -384,13 +459,14 @@ export default function Home() {
   }, [toast])
 
   const resetGame = React.useCallback(async (nextMode = mode) => {
-    if (nextMode === "ai" && !(await ensureAiConnection())) {
+    if (nextMode !== "local" && !(await ensureAiConnection())) {
       return
     }
 
     setAiError(null)
     setAiThinking(false)
-    if (nextMode === "ai") {
+    setHintCell(null)
+    if (nextMode !== "local") {
       resetAiMetrics()
     }
 
@@ -407,7 +483,7 @@ export default function Home() {
       forbiddenMoves: [],
     })
 
-    if (nextMode === "ai") {
+    if (nextMode !== "local") {
       try {
         setStartingAiGame(true)
         await gameClient.startGame(settings.boardSize, nextMode)
@@ -431,6 +507,7 @@ export default function Home() {
 
     setMode("ai")
     setAiThinking(false)
+    setHintCell(null)
     resetAiMetrics()
     addAiLog("Starting AI game")
     setGameState({
@@ -456,6 +533,43 @@ export default function Home() {
     }
   }, [addAiLog, ensureAiConnection, resetAiMetrics, settings.boardSize, toast])
 
+  const startEveGame = React.useCallback(async () => {
+    setStartingAiGame(true)
+    setAiError(null)
+
+    if (!(await ensureAiConnection())) {
+      setStartingAiGame(false)
+      return
+    }
+
+    setMode("eve")
+    setAiThinking(false)
+    setHintCell(null)
+    resetAiMetrics()
+    addAiLog("Starting EvE game")
+    setGameState({
+      board: createBoard(settings.boardSize),
+      currentPlayer: HUMAN_PLAYER,
+      moves: [],
+      lastMove: null,
+      status: "waiting",
+      winner: null,
+      boardSize: settings.boardSize,
+      mode: "eve",
+      players: getPlayers("eve"),
+      forbiddenMoves: [],
+    })
+
+    try {
+      await gameClient.startGame(settings.boardSize, "eve")
+    } catch (error) {
+      console.error("Failed to start EvE game:", error)
+      setStartingAiGame(false)
+      setAiError("Failed to start EvE game")
+      toast(`Failed to start EvE game: ${error}`, "destructive")
+    }
+  }, [addAiLog, ensureAiConnection, resetAiMetrics, settings.boardSize, toast])
+
   React.useEffect(() => {
     if (settings.boardSize !== gameState.boardSize) {
       resetGame()
@@ -465,6 +579,11 @@ export default function Home() {
   const handleCellClick = React.useCallback(
     async (row: number, col: number) => {
       if (gameState.status !== "playing") {
+        return
+      }
+
+      if (mode === "eve") {
+        toast("EvE mode is fully automated", "destructive")
         return
       }
 
@@ -491,6 +610,7 @@ export default function Home() {
         try {
           setAiError(null)
           setAiThinking(true)
+          setHintCell(null)
           await gameClient.makeMove(col, row) // Backend uses x=col, y=row
           // Server will respond with board-cell event to update the board
         } catch (error) {
@@ -523,6 +643,7 @@ export default function Home() {
       const move = createMove(row, col, gameState.currentPlayer)
       const newMoves = [...gameState.moves, move]
       const hasWon = checkWin(result.board, row, col, gameState.currentPlayer)
+      setHintCell(null)
 
       setGameState((prev) => ({
         ...prev,
@@ -539,6 +660,11 @@ export default function Home() {
 
   const handleUndo = React.useCallback(async () => {
     if (gameState.moves.length === 0) {
+      return
+    }
+
+    if (mode === "eve") {
+      toast("Undo is disabled in EvE mode", "destructive")
       return
     }
 
@@ -592,15 +718,57 @@ export default function Home() {
     resetGame()
   }, [resetGame])
 
+  const handleHint = React.useCallback(async () => {
+    if (gameState.status !== "playing") {
+      return
+    }
+
+    if (mode === "eve") {
+      toast("Hints are disabled in EvE mode", "destructive")
+      return
+    }
+
+    if (!gameClient.isConnected()) {
+      toast("AI server is not connected", "destructive")
+      return
+    }
+
+    if (
+      mode === "ai" &&
+      (gameState.currentPlayer !== HUMAN_PLAYER || aiThinking || startingAiGame)
+    ) {
+      toast("Hint is available only on your turn", "destructive")
+      return
+    }
+
+    try {
+      setAiError(null)
+      await gameClient.requestMoveHint()
+    } catch (error) {
+      console.error("Failed to request hint:", error)
+      setAiError("Failed to request hint")
+      toast(`Failed to request hint: ${error}`, "destructive")
+    }
+  }, [aiThinking, gameState.currentPlayer, gameState.status, mode, startingAiGame, toast])
+
   const handleResign = React.useCallback(async () => {
-    if (mode === "ai" && gameClient.isConnected()) {
+    if ((mode === "ai" || mode === "eve") && gameClient.isConnected()) {
       try {
         await gameClient.leaveGame()
       } catch (error) {
         console.error("Failed to leave game:", error)
       }
-    } else if (mode === "ai") {
+    } else if (mode === "ai" || mode === "eve") {
       toast("AI server is not connected", "destructive")
+      return
+    }
+
+    if (mode === "eve") {
+      setGameState((prev) => ({
+        ...prev,
+        status: "waiting",
+        winner: null,
+      }))
       return
     }
     
@@ -612,13 +780,45 @@ export default function Home() {
   }, [mode, toast])
 
   const handleModeChange = React.useCallback(async (newMode: GameMode) => {
-    if (newMode === "ai" && !(await ensureAiConnection())) {
+    if (mode === "eve" && newMode !== "eve") {
+      setPendingModeSwitch(newMode)
+      setEveExitDialogOpen(true)
+      return
+    }
+
+    if (newMode !== "local" && !(await ensureAiConnection())) {
       return
     }
 
     setMode(newMode)
     await resetGame(newMode)
-  }, [ensureAiConnection, resetGame])
+  }, [ensureAiConnection, mode, resetGame])
+
+  const confirmEveExit = React.useCallback(async () => {
+    const targetMode = pendingModeSwitch
+    setEveExitDialogOpen(false)
+    setPendingModeSwitch(null)
+
+    if (!targetMode) {
+      return
+    }
+
+    if (gameClient.isConnected()) {
+      try {
+        await gameClient.leaveGame()
+      } catch (error) {
+        console.error("Failed to close EvE session:", error)
+      }
+    }
+
+    setMode(targetMode)
+    await resetGame(targetMode)
+  }, [pendingModeSwitch, resetGame])
+
+  const cancelEveExit = React.useCallback(() => {
+    setEveExitDialogOpen(false)
+    setPendingModeSwitch(null)
+  }, [])
 
   const handleSettingsChange = React.useCallback(
     (newSettings: Partial<GameSettings>) => {
@@ -629,7 +829,8 @@ export default function Home() {
 
   const showEndgameDialog =
     gameState.status === "finished" && gameState.winner !== null
-  const isAiMode = mode === "ai"
+  const isAiMode = mode === "ai" || mode === "eve"
+  const isEveMode = mode === "eve"
   const isHumanTurn = gameState.currentPlayer === HUMAN_PLAYER
   const boardDisabled =
     gameState.status !== "playing" ||
@@ -645,11 +846,13 @@ export default function Home() {
         ? "AI server offline"
         : startingAiGame
           ? "Starting AI game"
-          : aiThinking
-            ? "AI thinking..."
-            : isHumanTurn
-              ? "Your turn"
-              : "Waiting for AI")
+          : isEveMode
+            ? "AI vs AI running"
+            : aiThinking
+              ? "AI thinking..."
+              : isHumanTurn
+                ? "Your turn"
+                : "Waiting for AI")
 
   console.log("Current game status:", gameState.status)
 
@@ -696,6 +899,13 @@ export default function Home() {
                   disabled={startingAiGame || connectionStatus !== "connected"}
                 >
                   {startingAiGame ? "Starting AI..." : "vs AI"}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={startEveGame}
+                  disabled={startingAiGame || connectionStatus !== "connected"}
+                >
+                  {startingAiGame ? "Starting AI..." : "EvE"}
                 </Button>
               </div>
 
@@ -780,17 +990,25 @@ export default function Home() {
               mode={mode}
               onModeChange={handleModeChange}
               onUndo={handleUndo}
+              onHint={handleHint}
               onRestart={handleRestart}
               onResign={handleResign}
               aiStatus={aiStatus}
               aiMetrics={isAiMode ? aiMetrics : null}
               actionsDisabled={startingAiGame || aiThinking}
+              hintDisabled={
+                gameState.status !== "playing" ||
+                connectionStatus !== "connected" ||
+                isEveMode ||
+                (isAiMode && (!isHumanTurn || aiThinking || startingAiGame))
+              }
             />
           </div>
           <div className="flex min-h-[60vh] items-center justify-center lg:min-h-0 lg:justify-end">
             <Board
               board={gameState.board}
               lastMove={gameState.lastMove}
+              hintCell={hintCell}
               currentPlayer={gameState.currentPlayer}
               showCoordinates={settings.showCoordinates}
               onCellClick={handleCellClick}
@@ -819,6 +1037,23 @@ export default function Home() {
           resetGame()
         }}
       />
+      <Dialog open={eveExitDialogOpen} onOpenChange={setEveExitDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Close EvE Session?</DialogTitle>
+            <DialogDescription>
+              Switching modes will end the current EvE session. Confirm to close
+              it and continue.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={cancelEveExit}>
+              Keep Session
+            </Button>
+            <Button onClick={confirmEveExit}>Close and Continue</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

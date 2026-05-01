@@ -1,6 +1,6 @@
 export type Stone = "black" | "white" | null
 
-export type GameMode = "local" | "ai"
+export type GameMode = "local" | "ai" | "eve"
 
 export type GameStatus = "waiting" | "playing" | "finished"
 

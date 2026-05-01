@@ -99,6 +99,15 @@ impl GameState {
             ));
         }
 
+        info!("Checking for forbidden move");
+        // check for forbidden move
+        if self.turn.forbidden_sequences.contains(&(x, y)) {
+            return Err(Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Move is forbidden for the current player",
+            ));
+        }
+
         info!("Determining current player");
 
         let cur = self.get_current_player();

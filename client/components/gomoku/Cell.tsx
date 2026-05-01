@@ -9,6 +9,7 @@ interface CellProps {
   row: number
   col: number
   isLastMove: boolean
+  isHint?: boolean
   showCoordinates: boolean
   onCellClick: (row: number, col: number) => void
   onCellHover?: (row: number, col: number) => void
@@ -22,6 +23,7 @@ export function Cell({
   row,
   col,
   isLastMove,
+  isHint = false,
   showCoordinates,
   onCellClick,
   onCellHover,
@@ -45,6 +47,7 @@ export function Cell({
         "hover:bg-white/15 dark:hover:bg-white/5",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         isLastMove && "ring-2 ring-primary ring-offset-1 ring-offset-transparent",
+        isHint && !stone && "ring-2 ring-amber-500/70 ring-offset-1 ring-offset-transparent",
         isForbidden && !stone && "hover:bg-red-500/10 dark:hover:bg-red-500/10 cursor-not-allowed"
       )}
       onClick={() => onCellClick(row, col)}
@@ -75,6 +78,9 @@ export function Cell({
       )}
       {isForbidden && !stone && (
         <div className="absolute h-2.5 w-2.5 rounded-full bg-red-500/70 dark:bg-red-500/60 select-none pointer-events-none" />
+      )}
+      {isHint && !stone && (
+        <div className="absolute h-4 w-4 rounded-full bg-amber-400/75 dark:bg-amber-300/70 pointer-events-none hint-blink" />
       )}
       {showCoordinates && (
         <span className="absolute text-[0.5rem] text-muted-foreground opacity-30 pointer-events-none">
