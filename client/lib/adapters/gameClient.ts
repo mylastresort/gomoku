@@ -253,7 +253,7 @@ class GameClient {
     }
 
     const backendMode: GameStartPayload["mode"] =
-      mode === "ai" ? "PvE" : "PvP"
+      mode === "ai" ? "PvE" : mode === "eve" ? "EvE" : "PvP"
 
     const payload = {
       board_size: boardSize,
