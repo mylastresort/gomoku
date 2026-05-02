@@ -452,7 +452,7 @@ export default function Home() {
   }, [toast])
 
   const resetGame = React.useCallback(async (nextMode = mode) => {
-    if (!(await ensureAiConnection())) {
+    if (nextMode !== "local" && !(await ensureAiConnection())) {
       return
     }
 
@@ -474,14 +474,16 @@ export default function Home() {
       forbiddenMoves: [],
     })
 
-    try {
-      setStartingAiGame(true)
-      await gameClient.startGame(settings.boardSize, nextMode)
-    } catch (error) {
-      console.error("Failed to start game:", error)
-      setStartingAiGame(false)
-      setAiError("Failed to start game")
-      toast(`Failed to start game: ${error}`, "destructive")
+    if (nextMode !== "local") {
+      try {
+        setStartingAiGame(true)
+        await gameClient.startGame(settings.boardSize, nextMode)
+      } catch (error) {
+        console.error("Failed to start game:", error)
+        setStartingAiGame(false)
+        setAiError("Failed to start game")
+        toast(`Failed to start game: ${error}`, "destructive")
+      }
     }
   }, [ensureAiConnection, resetAiMetrics, settings.boardSize, mode, toast])
 
@@ -683,8 +685,8 @@ export default function Home() {
       return
     }
 
-    if (mode === "eve" || mode === "local") {
-      toast("Hints are not available in this mode", "destructive")
+    if (mode === "eve") {
+      toast("Hints are disabled in EvE mode", "destructive")
       return
     }
 
@@ -718,9 +720,8 @@ export default function Home() {
       } catch (error) {
         console.error("Failed to leave game:", error)
       }
-    } else if (mode === "ai" || mode === "eve") {
+    } else if (mode === "ai" || mode === "eve" || mode === "local") {
       toast("Server is not connected", "destructive")
-      return
     }
 
     if (mode === "eve") {
@@ -731,7 +732,7 @@ export default function Home() {
       }))
       return
     }
-    
+
     setGameState((prev) => ({
       ...prev,
       status: "finished",
@@ -746,7 +747,7 @@ export default function Home() {
       return
     }
 
-    if (!(await ensureAiConnection())) {
+    if (newMode !== "local" && !(await ensureAiConnection())) {
       return
     }
 
