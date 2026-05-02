@@ -474,7 +474,7 @@ export default function Home() {
       forbiddenMoves: [],
     })
 
-    if (nextMode !== "local") {
+    // if (nextMode !== "local") {
       try {
         setStartingAiGame(true)
         await gameClient.startGame(settings.boardSize, nextMode)
@@ -484,7 +484,7 @@ export default function Home() {
         setAiError("Failed to start game")
         toast(`Failed to start game: ${error}`, "destructive")
       }
-    }
+    // }
   }, [ensureAiConnection, resetAiMetrics, settings.boardSize, mode, toast])
 
   const startAiGame = React.useCallback(async () => {
