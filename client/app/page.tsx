@@ -39,8 +39,8 @@ const defaultSettings: GameSettings = {
 }
 
 const localPlayers = {
-  black: { id: "1", name: "Player 1", color: "black" as const },
-  white: { id: "2", name: "Player 2", color: "white" as const },
+  black: { id: "1", name: "Black", color: "black" as const },
+  white: { id: "2", name: "White", color: "white" as const },
 }
 
 const aiPlayers = {
