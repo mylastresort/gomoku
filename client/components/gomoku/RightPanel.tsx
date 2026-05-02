@@ -84,7 +84,7 @@ export function RightPanel({
           <div className="flex flex-col gap-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <div className="h-8 w-8 rounded-full bg-neutral-950 dark:bg-neutral-100 flex items-center justify-center text-white dark:text-neutral-950 text-xs font-bold">
+                <div className="h-8 w-8 rounded-full bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 flex items-center justify-center text-neutral-950 dark:text-neutral-50 text-xs font-bold">
                   {gameState.players.black.name[0].toUpperCase()}
                 </div>
                 <div className="flex flex-col">
@@ -103,7 +103,7 @@ export function RightPanel({
 
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <div className="h-8 w-8 rounded-full bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 flex items-center justify-center text-neutral-950 dark:text-neutral-50 text-xs font-bold">
+                <div className="h-8 w-8 rounded-full bg-neutral-950 dark:bg-neutral-100 flex items-center justify-center text-white dark:text-neutral-950 text-xs font-bold">
                   {gameState.players.white.name[0].toUpperCase()}
                 </div>
                 <div className="flex flex-col">
