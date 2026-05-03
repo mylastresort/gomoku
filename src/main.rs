@@ -75,7 +75,8 @@ pub async fn handle_connection(s: SocketRef, config: Config) {
                                     }
 
                                     // Keep one second between each AI move in EvE mode.
-                                    sleep(Duration::from_secs(1)).await;
+                                    // sleep(Duration::from_secs(1)).await;
+                                    sleep(Duration::from_millis(700)).await;
 
                                     let mut g = eve_session.lock().await;
                                     if !g.should_continue_eve() {
