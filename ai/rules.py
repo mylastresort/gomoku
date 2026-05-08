@@ -173,6 +173,43 @@ def count_free_threes(board: Board, player: int, x: int, y: int) -> int:
     return total
 
 
+# ==================================================
+# Suicide-move detection (Rule 1)
+# ==================================================
+
+def is_suicide_move(board: Board, x: int, y: int, player: int) -> bool:
+    """
+    A move is suicidal if the placed stone immediately forms a capturable
+    pair: it has an ally neighbour along some axis AND both outer flanks of
+    that pair (the cell behind the placed stone and the cell past the ally)
+    are already occupied by opponent stones.
+
+    Both orientations of every axis are tried so every alignment is covered.
+    The stone is assumed to already sit on the board when this is called.
+    """
+    opponent = get_opponent(player)
+
+    for dx, dy in DIRECTIONS:
+        for ax, ay in ((dx, dy), (-dx, -dy)):
+            partner_x = x + ax
+            partner_y = y + ay
+
+            if not is_in_bounds(partner_x, partner_y):
+                continue
+            if board[partner_y][partner_x] != player:
+                continue
+
+            far_x,  far_y  = partner_x + ax, partner_y + ay   # one step past ally
+            near_x, near_y = x - ax,         y - ay            # one step behind placed stone
+
+            if not (is_in_bounds(far_x, far_y) and is_in_bounds(near_x, near_y)):
+                continue
+
+            if board[far_y][far_x] == opponent and board[near_y][near_x] == opponent:
+                return True
+
+    return False
+
 def is_legal_move(
     board: Board,
     x: int,
@@ -181,20 +218,27 @@ def is_legal_move(
     captures: Dict[int, int],
 ) -> bool:
     """
-    Legal move rules used here:
-    - cell must be empty
-    - if the move captures, it is legal even if it creates double-three
-    - otherwise, 2 or more free-threes means illegal
+    Legal move rules:
+    - cell must be empty and in bounds
+    - Rule 1: suicide (placed stone immediately capturable) → illegal,
+              unless the same move itself makes a capture (mirrors Rust)
+    - Rule 2: double-three → illegal unless the move makes a capture
     """
     if not is_in_bounds(x, y) or board[y][x] != EMPTY:
+        return False
+    
+    # Rule 1 – suicide
+    if is_suicide_move(board, x, y, player):
         return False
 
     history = apply_move_with_captures(board, x, y, player, captures)
     made_capture = len(history) > 1
 
     legal = True
-    if not made_capture and count_free_threes(board, player, x, y) >= 2:
-        legal = False
+    if not made_capture:
+        # Rule 2 – double-three (only checked when not already illegal)
+        if legal and count_free_threes(board, player, x, y) >= 2:
+            legal = False
 
     undo_move_with_captures(board, captures, player, history)
     return legal
