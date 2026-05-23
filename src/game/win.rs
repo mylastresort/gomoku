@@ -8,11 +8,26 @@ use crate::game::{
 };
 
 #[derive(Clone, Debug)]
+pub struct FlankInfo {
+    /// A stone of the flankable pair (lies inside `Win::win_seq`).
+    pub stone: (usize, usize),
+    /// Axis of the flankable pair (one of (1,0), (0,1), (1,1), (1,-1)).
+    pub direction: (isize, isize),
+    /// Empty edge cell: the opponent placing here forms
+    /// `opp ? ? opp` around the pair, capturing it and breaking the five.
+    pub capture_move: (usize, usize),
+}
+
+#[derive(Clone, Debug)]
 pub struct Win {
     pub player_id: Player,
     pub win_seq: Option<Vec<(usize, usize)>>,
     pub is_by_five: bool,
     pub is_flanked: bool,
+    /// Set only when `is_flanked` is true. Lets callers locate, without
+    /// rescanning the board, the exact cell where the opponent must play
+    /// to capture-break the flanked five.
+    pub flank: Option<FlankInfo>,
 }
 
 pub trait GameWin {}
@@ -84,7 +99,7 @@ impl Win {
         dx: isize,
         dy: isize,
         current_player: Player,
-    ) -> bool {
+    ) -> Option<FlankInfo> {
         let opponent = current_player.opponent();
 
         // Count stones in both directions from current position
@@ -132,7 +147,7 @@ impl Win {
 
         // Check if exactly 2 stones
         if count != 2 {
-            return false;
+            return None;
         }
 
         // Get edge cells
@@ -152,7 +167,7 @@ impl Win {
 
         // Skip if one edge is out of bounds
         if !forward_in_bounds || !backward_in_bounds {
-            return false;
+            return None;
         }
 
         let forward_edge =
@@ -160,19 +175,31 @@ impl Win {
         let backward_edge =
             board[backward_edge_y as usize][backward_edge_x as usize];
 
-        // Check if one edge is empty and other is opponent
-        let flanked = (forward_edge.is_none()
-            && backward_edge == Some(opponent))
-            || (forward_edge == Some(opponent) && backward_edge.is_none());
+        // Pair is flanked when one edge holds an opponent stone and the
+        // other edge is empty. The empty edge is exactly where the opponent
+        // must place its stone to complete the capture.
+        let capture_edge: Option<(usize, usize)> =
+            if forward_edge.is_none() && backward_edge == Some(opponent) {
+                Some((forward_edge_x as usize, forward_edge_y as usize))
+            } else if forward_edge == Some(opponent) && backward_edge.is_none()
+            {
+                Some((backward_edge_x as usize, backward_edge_y as usize))
+            } else {
+                None
+            };
 
-        if flanked {
-            warn!(
-                "Flanked found at ({}, {}) in direction ({}, {}): {} stones with edges {:?} and {:?}",
-                x, y, dx, dy, count, backward_edge, forward_edge
-            );
-        }
+        let capture_move = capture_edge?;
 
-        flanked
+        warn!(
+            "Flanked found at ({}, {}) in direction ({}, {}): {} stones with edges {:?} and {:?}; capture move at {:?}",
+            x, y, dx, dy, count, backward_edge, forward_edge, capture_move
+        );
+
+        Some(FlankInfo {
+            stone: (x, y),
+            direction: (dx, dy),
+            capture_move,
+        })
     }
 
     fn check_flanked(
@@ -180,10 +207,10 @@ impl Win {
         x: usize,
         y: usize,
         current_player: Player,
-    ) -> bool {
+    ) -> Option<FlankInfo> {
         // Check all four directions: horizontal, vertical, and both diagonals
         for (dx, dy) in [(1, 0), (0, 1), (1, 1), (1, -1)] {
-            if Self::check_flanked_in_direction(
+            if let Some(info) = Self::check_flanked_in_direction(
                 board,
                 x,
                 y,
@@ -191,11 +218,11 @@ impl Win {
                 dy,
                 current_player,
             ) {
-                return true;
+                return Some(info);
             }
         }
 
-        false
+        None
     }
 
     fn is_position_in_bounds(
@@ -266,7 +293,6 @@ impl Win {
         let current_player = game_move.player_id;
         let mut stones = 1;
         let mut win_seq = vec![(game_move.x, game_move.y)];
-        let mut is_flanked = false;
 
         info!(
             "Checking direction dx: {}, dy: {} for five in a row",
@@ -291,19 +317,27 @@ impl Win {
         info!("Total stones in a row: {}", stones);
 
         if stones >= Self::STONES_TO_WIN {
-            // Check if any stone in the winning sequence can be flanked
+            let mut flank: Option<FlankInfo> = None;
+
+            // Locate the first flankable stone within the winning sequence
+            // and remember its full flank info (stone, direction, capture cell).
             for (stone_x, stone_y) in &win_seq {
-                if Self::check_flanked(
+                if let Some(info) = Self::check_flanked(
                     board,
                     *stone_x,
                     *stone_y,
                     current_player,
                 ) {
-                    is_flanked = true;
-                    info!("Stone at ({}, {}) can be flanked", stone_x, stone_y);
+                    info!(
+                        "Stone at ({}, {}) can be flanked along {:?}; capture move at {:?}",
+                        stone_x, stone_y, info.direction, info.capture_move
+                    );
+                    flank = Some(info);
                     break;
                 }
             }
+
+            let is_flanked = flank.is_some();
 
             info!(
                 "Player {:?} has five in a row! (flanked: {})",
@@ -314,6 +348,7 @@ impl Win {
                 player_id: game_move.player_id,
                 win_seq: Some(win_seq),
                 is_flanked,
+                flank,
             });
         }
 
@@ -344,6 +379,7 @@ impl Win {
                 win_seq: None,
                 is_by_five: false,
                 is_flanked: false,
+                flank: None,
             });
         }
 

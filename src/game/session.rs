@@ -173,7 +173,7 @@ impl GameSession {
         }
 
         info!("Requesting Python AI move");
-        let ai_move = invoke_python_ai_from_game_state(
+        let ai_outcome = invoke_python_ai_from_game_state(
             &PythonBridgeConfig::default(),
             &self.state,
             ai_player,
@@ -185,11 +185,39 @@ impl GameSession {
             )
         })?;
 
-        let Some((x, y)) = ai_move else {
-            return Err(Error::new(
-                std::io::ErrorKind::Other,
-                "Python AI did not return a move",
-            ));
+        let (x, y) = if let Some(m) = ai_outcome.move_ {
+            m
+        } else {
+            // The Python AI did not pick a move. Try the saved flank
+            // capture from the last (flanked) win first — that is the
+            // single forced response to a flanked five. Otherwise, fall
+            // back to any legal move the AI surfaced.
+            let flank_move = self
+                .state
+                .get_last_game_winner()
+                .filter(|w| w.is_by_five && w.is_flanked)
+                .filter(|w| w.player_id.opponent() == ai_player)
+                .and_then(|w| w.flank)
+                .map(|f| f.capture_move);
+
+            if let Some(m) = flank_move {
+                info!(
+                    "Python AI returned null; using saved flank capture at ({}, {})",
+                    m.0, m.1
+                );
+                m
+            } else if let Some(m) = ai_outcome.legal_move {
+                info!(
+                    "Python AI returned null and no flank capture is possible; falling back to legal move ({}, {})",
+                    m.0, m.1
+                );
+                m
+            } else {
+                return Err(Error::new(
+                    std::io::ErrorKind::Other,
+                    "Python AI did not return a move",
+                ));
+            }
         };
 
         info!("Python AI selected move at ({}, {})", x, y);
@@ -365,7 +393,7 @@ impl GameSession {
             current_player
         );
 
-        let ai_move = invoke_python_ai_from_game_state(
+        let ai_outcome = invoke_python_ai_from_game_state(
             &PythonBridgeConfig::default(),
             &self.state,
             current_player,
@@ -377,7 +405,7 @@ impl GameSession {
             )
         })?;
 
-        let Some((x, y)) = ai_move else {
+        let Some((x, y)) = ai_outcome.move_ else {
             return Err(Error::new(
                 std::io::ErrorKind::Other,
                 "Python AI did not return a hint",

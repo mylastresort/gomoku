@@ -12,6 +12,7 @@ from .constants import (
     EMPTY,
     OPPONENT_PLAYER,
 )
+from .rules import get_legal_moves
 
 
 def _to_ai_board(rows: list, ai_is_black: bool) -> list[list[int]]:
@@ -61,7 +62,25 @@ def main() -> None:
         time_limit_ms=time_limit_ms,
     )
     if move is None:
-        print(json.dumps({"ok": True, "move": None}), flush=True)
+        # The AI ran out of time (or had no preferred move). Surface a
+        # single legal move so the Rust server has a fallback to pick
+        # from instead of getting a bare null.
+        captures = {AI_PLAYER: ai_captures, OPPONENT_PLAYER: opponent_captures}
+        legal = get_legal_moves(board, AI_PLAYER, captures)
+        legal_move = None
+        if legal:
+            lx, ly = next(iter(legal))
+            legal_move = [lx, ly]
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "move": None,
+                    "legal_move": legal_move,
+                }
+            ),
+            flush=True,
+        )
     else:
         x, y = move
         print(json.dumps({"ok": True, "move": [x, y]}), flush=True)

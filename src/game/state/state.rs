@@ -158,6 +158,7 @@ impl GameState {
             {
                 info!("Last game winner found: {:?}", winner);
                 winner.is_flanked = false;
+                winner.flank = None;
                 return Some(winner);
             }
             None

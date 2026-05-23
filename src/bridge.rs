@@ -41,7 +41,19 @@ struct BridgeResponse {
     #[serde(default, rename = "move")]
     move_: Option<(usize, usize)>,
     #[serde(default)]
+    legal_move: Option<(usize, usize)>,
+    #[serde(default)]
     error: Option<String>,
+}
+
+/// Outcome of a single Python AI invocation.
+#[derive(Clone, Debug, Default)]
+pub struct AiOutcome {
+    /// The move chosen by the Python AI, if any.
+    pub move_: Option<(usize, usize)>,
+    /// A single legal move the Python AI surfaces when `move_` is
+    /// `None`, so the Rust server has a safe fallback.
+    pub legal_move: Option<(usize, usize)>,
 }
 
 #[derive(Debug)]
@@ -127,7 +139,7 @@ impl BridgePayload {
 pub fn invoke_python_ai(
     config: &PythonBridgeConfig,
     payload: &BridgePayload,
-) -> Result<Option<(usize, usize)>, BridgeError> {
+) -> Result<AiOutcome, BridgeError> {
     if payload.board.len() != EXPECTED_BOARD_LEN {
         return Err(BridgeError::UnsupportedBoardSize(payload.board.len()));
     }
@@ -158,14 +170,17 @@ pub fn invoke_python_ai(
             .unwrap_or_else(|| "unknown bridge error".to_string());
         return Err(BridgeError::Protocol(msg));
     }
-    Ok(parsed.move_)
+    Ok(AiOutcome {
+        move_: parsed.move_,
+        legal_move: parsed.legal_move,
+    })
 }
 
 pub fn invoke_python_ai_from_game_state(
     config: &PythonBridgeConfig,
     state: &GameState,
     ai: Player,
-) -> Result<Option<(usize, usize)>, BridgeError> {
+) -> Result<AiOutcome, BridgeError> {
     let payload = BridgePayload::from_game_state(state, ai)?;
     invoke_python_ai(config, &payload)
 }
