@@ -178,15 +178,15 @@ impl Win {
         // Pair is flanked when one edge holds an opponent stone and the
         // other edge is empty. The empty edge is exactly where the opponent
         // must place its stone to complete the capture.
-        let capture_edge: Option<(usize, usize)> =
-            if forward_edge.is_none() && backward_edge == Some(opponent) {
-                Some((forward_edge_x as usize, forward_edge_y as usize))
-            } else if forward_edge == Some(opponent) && backward_edge.is_none()
-            {
-                Some((backward_edge_x as usize, backward_edge_y as usize))
-            } else {
-                None
-            };
+        let capture_edge: Option<(usize, usize)> = if forward_edge.is_none()
+            && backward_edge == Some(opponent)
+        {
+            Some((forward_edge_x as usize, forward_edge_y as usize))
+        } else if forward_edge == Some(opponent) && backward_edge.is_none() {
+            Some((backward_edge_x as usize, backward_edge_y as usize))
+        } else {
+            None
+        };
 
         let capture_move = capture_edge?;
 

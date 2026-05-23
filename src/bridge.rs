@@ -100,7 +100,10 @@ impl From<serde_json::Error> for BridgeError {
 }
 
 impl BridgePayload {
-    pub fn from_game_state(state: &GameState, ai: Player) -> Result<Self, BridgeError> {
+    pub fn from_game_state(
+        state: &GameState,
+        ai: Player,
+    ) -> Result<Self, BridgeError> {
         let n = state.board.len();
         if n != EXPECTED_BOARD_LEN || state.board.iter().any(|r| r.len() != n) {
             return Err(BridgeError::UnsupportedBoardSize(n));
@@ -159,11 +162,12 @@ pub fn invoke_python_ai(
     let output = child.wait_with_output()?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let parsed: BridgeResponse = serde_json::from_str(stdout.trim()).map_err(|e| {
-        BridgeError::Protocol(format!(
-            "invalid bridge stdout: {e}; stderr: {stderr}"
-        ))
-    })?;
+    let parsed: BridgeResponse =
+        serde_json::from_str(stdout.trim()).map_err(|e| {
+            BridgeError::Protocol(format!(
+                "invalid bridge stdout: {e}; stderr: {stderr}"
+            ))
+        })?;
     if !parsed.ok {
         let msg = parsed
             .error

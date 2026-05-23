@@ -8,7 +8,7 @@ use crate::{
     bridge::{PythonBridgeConfig, invoke_python_ai_from_game_state},
     events::room::{
         board::BoardCellEvent, game_ended::GameEndedEvent,
-        game_started::GameStartedEvent, game_turn::GameTurnEvent,
+        game_started::GameStartedEvent, game_turn::{GameTurnEvent, GameTurnPayload},
         win::GameWinEvent,
     },
     game::{
@@ -152,7 +152,7 @@ impl GameSession {
                 self.state.get_current_player()
             );
             self.room
-                .notify_room::<GameTurnEvent>(_s, Some(self.state.turn.clone()))
+                .notify_room::<GameTurnEvent>(_s, Some(GameTurnPayload::from_state(&self.state)))
                 .await;
         }
 
@@ -278,7 +278,7 @@ impl GameSession {
         self.room.notify_room::<GameStartedEvent>(_s, None).await;
         // notify about the first turn
         self.room
-            .notify_room::<GameTurnEvent>(_s, Some(self.state.turn.clone()))
+            .notify_room::<GameTurnEvent>(_s, Some(GameTurnPayload::from_state(&self.state)))
             .await;
     }
 

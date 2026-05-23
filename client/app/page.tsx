@@ -124,6 +124,7 @@ export default function Home() {
     mode: "local",
     players: getPlayers("local"),
     forbiddenMoves: [],
+    captures: { black: 0, white: 0 },
   }))
 
   React.useEffect(() => {
@@ -335,6 +336,10 @@ export default function Home() {
           ...prev,
           currentPlayer,
           forbiddenMoves: payload.forbiddenSequences,
+          captures: {
+            black: payload.captures?.Black ?? prev.captures.black,
+            white: payload.captures?.White ?? prev.captures.white,
+          },
         }))
         
         // Log forbidden sequences
@@ -472,6 +477,7 @@ export default function Home() {
       mode: nextMode,
       players: getPlayers(nextMode),
       forbiddenMoves: [],
+      captures: { black: 0, white: 0 },
     })
 
     // if (nextMode !== "local") {
@@ -512,6 +518,7 @@ export default function Home() {
       mode: "ai",
       players: getPlayers("ai"),
       forbiddenMoves: [],
+      captures: { black: 0, white: 0 },
     })
 
     try {
@@ -549,6 +556,7 @@ export default function Home() {
       mode: "eve",
       players: getPlayers("eve"),
       forbiddenMoves: [],
+      captures: { black: 0, white: 0 },
     })
 
     try {
