@@ -38,6 +38,10 @@ export interface GameTurnPayload {
   currentPlayer: "White" | "Black"
   forbiddenSequences: Array<[number, number]>
   turn: number
+  captures: {
+    Black: number
+    White: number
+  }
 }
 
 export interface EventErrorPayload {

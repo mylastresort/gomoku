@@ -150,4 +150,3 @@ def choose_best_move_with_stats(
 
     stats.elapsed_ms = (perf_counter() - start_time) * 1000.0
     return SearchResult(best_move, best_score, depth_reached, stats)
-

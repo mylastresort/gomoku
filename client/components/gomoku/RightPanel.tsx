@@ -94,9 +94,14 @@ export function RightPanel({
                   <span className="text-xs text-muted-foreground">Black</span>
                 </div>
               </div>
-              {gameState.currentPlayer === "black" && (
-                <Badge variant="default">Turn</Badge>
-              )}
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary" title="Captured pairs">
+                  {gameState.captures?.black ?? 0} captures
+                </Badge>
+                {gameState.currentPlayer === "black" && (
+                  <Badge variant="default">Turn</Badge>
+                )}
+              </div>
             </div>
 
             <Separator />
@@ -113,9 +118,14 @@ export function RightPanel({
                   <span className="text-xs text-muted-foreground">White</span>
                 </div>
               </div>
-              {gameState.currentPlayer === "white" && (
-                <Badge variant="default">Turn</Badge>
-              )}
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary" title="Captured pairs">
+                  {gameState.captures?.white ?? 0} captures
+                </Badge>
+                {gameState.currentPlayer === "white" && (
+                  <Badge variant="default">Turn</Badge>
+                )}
+              </div>
             </div>
           </div>
 
